@@ -16,9 +16,18 @@ costly: |consts| ^ |vars| per rule, independent of what is in the base.
 -- a rule only ever reads the variables it mentions.
 instance: Inhabited Constant := ⟨"a", by decide⟩
 
+-- Sample syntax, for the examples below.
+private def X: Variable := ⟨"X", by decide⟩
+private def Y: Variable := ⟨"Y", by decide⟩
+private def a: Constant := ⟨"a", by decide⟩
+private def b: Constant := ⟨"b", by decide⟩
+
 -- Total-ise a finite assignment into a `Subst`.
 def Subst.ofAssoc (l: List (Variable × Constant)): Subst :=
   λ v ↦ (l.find? λ p ↦ p.1 == v).elim default Prod.snd
+
+example: Subst.ofAssoc [(X, a), (Y, b)] Y = b := by decide
+example: Subst.ofAssoc [(X, a)] Y = default := by decide
 
 -- The variables a rule's body mentions. By `Rule.safe` these include every
 -- head variable, so a substitution's values here settle the whole ground
@@ -33,6 +42,9 @@ def Rule.vars (r: Rule): List Variable :=
 def Variable.assignments (vs: List Variable) (cs: List Constant):
     List (List (Variable × Constant)) :=
   List.choices (vs.map λ v ↦ cs.map (Prod.mk v))
+
+example: Variable.assignments [X, Y] [a, b]
+       = [[(X,a), (Y,a)], [(X,a), (Y,b)], [(X,b), (Y,a)], [(X,b), (Y,b)]] := by decide
 
 -- Every value in an enumerated assignment came from `cs`.
 theorem Variable.assignments_mem {vs: List Variable} {cs: List Constant}

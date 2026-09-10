@@ -8,6 +8,11 @@ def List.choices {α: Type}: List (List α) → List (List α)
   | [] => [[]]
   | l :: ls => l.flatMap λ x ↦ (List.choices ls).map (x :: ·)
 
+example: List.choices [[1, 2], [3, 4]] = [[1,3], [1,4], [2,3], [2,4]] := by decide
+example: List.choices [[1, 2, 3]] = [[1], [2], [3]] := by decide
+example: List.choices ([]: List (List Nat)) = [[]] := by decide
+example: List.choices [[1, 2], []] = ([]: List (List Nat)) := by decide
+
 -- `choices` really does contain every pointwise selection: if `g` picks,
 -- for each `x` of `l`, some element of `f x`, then the list of picks is one
 -- of the choices.

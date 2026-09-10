@@ -34,6 +34,20 @@ def Program.stepAtoms (p: Program) (kb: List GrAtom): List GrAtom :=
       then some (σ.grounded r.head)
       else none
 
+-- The program `p(a).  q(X) :- p(X).`, for the examples below.
+private def X: Variable := ⟨"X", by decide⟩
+private def a: Constant := ⟨"a", by decide⟩
+private def p: Constant := ⟨"p", by decide⟩
+private def q: Constant := ⟨"q", by decide⟩
+private def prog: Program :=
+  [ ⟨⟨p, [.inr a]⟩, []             , by decide⟩
+  , ⟨⟨q, [.inl X]⟩, [⟨p, [.inl X]⟩], by decide⟩ ]
+private def pa: GrAtom := ⟨⟨p, [.inr a]⟩, by decide⟩
+private def qa: GrAtom := ⟨⟨q, [.inr a]⟩, by decide⟩
+
+example: prog.stepAtoms []   = [pa]     := by decide
+example: prog.stepAtoms [pa] = [pa, qa] := by decide
+
 -- Everything `stepAtoms` produces is some rule's head under a candidate
 -- substitution all of whose body atoms are already known.
 theorem Program.mem_stepAtoms {p: Program} {kb: List GrAtom}

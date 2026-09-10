@@ -59,13 +59,15 @@ theorem Atom.mem_consts {a: Atom} {c: Constant}:
   · intro h
     exact ⟨.inr c, h, rfl⟩
 
+-- Range restriction. Both `v` and `arg` are bounded by finite lists,
+-- so this is decidable with no help, e.g., with `by decide`.
+abbrev Rule.Safe (head: Atom) (body: List Atom): Prop :=
+  ∀ v ∈ head.vars, ∃ arg ∈ body, v ∈ arg.vars
+
 structure Rule where mk::
   head: Atom
   body: List Atom
-  safe: ∀ v,
-    v ∈ head.vars →
-    ∃ arg,
-      arg ∈ body ∧ v ∈ arg.vars
+  safe: Rule.Safe head body
 deriving Repr, DecidableEq
 
 abbrev Program := List Rule

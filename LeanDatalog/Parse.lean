@@ -21,26 +21,10 @@ back out to another parser (`commaListGo`, shared by `argListGo` and
 seeded with the input length, which is structurally decreasing on its own.
 -/
 
--- Decidable, computable stand-in for `Rule.safe`'s proposition: every
--- variable of `head` occurs as a variable of some atom in `body`.
-def Atom.safeAgainst (head: Atom) (body: List Atom): Bool :=
-  head.vars.all λ v ↦ (body.flatMap Atom.vars).any λ v' ↦ v'.val == v.val
-
-theorem Atom.safeAgainst_correct (head: Atom) (body: List Atom)
-    (h: head.safeAgainst body = true):
-    ∀ v, v ∈ head.vars → ∃ arg, arg ∈ body ∧ v ∈ arg.vars := by
-  intro v hv
-  have hcheck := List.all_eq_true.mp h v hv
-  simp only [List.any_eq_true, List.mem_flatMap, beq_iff_eq] at hcheck
-  obtain ⟨v', ⟨a, ha, hav'⟩, hveq⟩ := hcheck
-  refine ⟨a, ha, ?_⟩
-  rw [Subtype.ext hveq.symm]
-  exact hav'
-
--- `none` when `head :- body` isn't range-restricted, i.e. `Rule.safe` fails.
+-- `none` when `head :- body` isn't range-restricted, i.e. `Rule.Safe` fails.
 def Rule.ofHeadBody? (head: Atom) (body: List Atom): Option Rule :=
-  if h: head.safeAgainst body
-  then some { head, body, safe := Atom.safeAgainst_correct head body h }
+  if h: Rule.Safe head body
+  then some { head, body, safe := h }
   else none
 
 namespace Parse

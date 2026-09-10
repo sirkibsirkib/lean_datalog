@@ -18,7 +18,7 @@ and the least-model semantics.
 
 Two files carry the specification, and they are deliberately small:
 
-- **`LeanDatalog/Syntax.lean`** (71 lines) — `Constant`, `Variable`, `Atom`,
+- **`LeanDatalog/Syntax.lean`** (73 lines) — `Constant`, `Variable`, `Atom`,
   `Rule`, `Program`. Note that `Rule` carries its **range-restriction**
   obligation as a field: a rule cannot be constructed unless every variable
   of the head also occurs in the body. Safety is therefore expressed already in the abstract syntax, and the parser proves safety or rejects the input. From another point of view, we interleave what may otherwise be separated into parsing and static analysis.
