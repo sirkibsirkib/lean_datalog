@@ -1,0 +1,14 @@
+name = "lean_datalog"
+version = "0.1.0"
+defaultTargets = ["lean_datalog"]
+
+[[lean_lib]]
+name = "LeanDatalog"
+
+[[lean_exe]]
+name = "lean_datalog"
+root = "Main"
+
+[[lean_exe]]
+name = "bench"
+root = "Bench"
