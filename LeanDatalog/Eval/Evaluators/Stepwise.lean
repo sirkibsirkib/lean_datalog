@@ -105,7 +105,7 @@ theorem saturateGo_reachable (p: Program):
   | case2 kb a hfind ih =>
     intro h
     rw [saturateGo.eq_def, hfind]
-    refine ih (.scoc _ _ _ h ?_)
+    refine ih (.snoc _ _ _ h ?_)
     obtain ⟨r, hr, σ, _, hbody, rfl⟩ :=
       Program.mem_stepAtoms (List.mem_of_find?_eq_some hfind)
     have hnew := List.find?_some hfind

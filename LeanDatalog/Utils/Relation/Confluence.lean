@@ -82,7 +82,7 @@ theorem SemiDiamond.strip {α: Type} {r: EndoRel α} (hd: r.SemiDiamond):
   intro x y z hxy hxz
   induction hxz with
   | refl _ => exact ⟨y, .refl _, hxy⟩
-  | scoc _ z' z _ hz'z ih =>
+  | snoc _ z' z _ hz'z ih =>
     obtain ⟨w, hyw, hz'w⟩ := ih hxy
     cases hz'w with
     | refl _ => exact ⟨z, hyw.trans (.single hz'z), .refl _⟩
@@ -97,7 +97,7 @@ theorem SemiDiamond.confluent {α: Type} {r: EndoRel α}:
   intro hd x y z hxy hxz
   induction hxy with
   | refl _ => exact ⟨z, hxz, .refl _⟩
-  | scoc _ y' y _ hy'y ih =>
+  | snoc _ y' y _ hy'y ih =>
     obtain ⟨w, hy'w, hzw⟩ := ih hxz
     obtain ⟨v, hyv, hwv⟩ := hd.strip (.single _ _ hy'y) hy'w
     exact ⟨v, hyv, hzw.trans hwv.toReflTransGen⟩

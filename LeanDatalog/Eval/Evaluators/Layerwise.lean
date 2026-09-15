@@ -146,7 +146,7 @@ theorem reachable_append (p: Program) (kb: List GrAtom):
         · intro hx; exact .tail _ hx
       rw [heq]
       exact hrest
-    · refine .scoc _ _ _ hrest ?_
+    · refine .snoc _ _ _ hrest ?_
       obtain ⟨r, hr, σ, _, hbody, rfl⟩ := Program.mem_stepAtoms (hl a (.head _))
       exact ⟨r, hr, σ, λ b hb ↦ List.mem_append_right _ (hbody b hb),
         hmem, Set.ofList_cons⟩

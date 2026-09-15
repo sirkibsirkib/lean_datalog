@@ -21,7 +21,7 @@ theorem Normal.eq_of_reflTransGen {α: Type} {r: EndoRel α} {x y: α}:
   intro hn h
   induction h with
   | refl _ => rfl
-  | scoc _ a y _ hstep ih =>
+  | snoc _ a y _ hstep ih =>
     have hxa := ih hn
     subst hxa
     exact absurd ⟨y, hstep⟩ hn

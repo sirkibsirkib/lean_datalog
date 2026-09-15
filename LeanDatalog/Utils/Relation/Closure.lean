@@ -1,4 +1,12 @@
 abbrev Rel α β := α → β → Prop
+
+example: Rel Nat Nat := λ m n ↦ m = n
+def all_nat: Rel Nat Nat := λ _ _ ↦ True
+
+example: all_nat 5 3 := by
+  unfold all_nat
+  exact True.intro
+
 abbrev EndoRel α := Rel α α
 
 /-
@@ -12,10 +20,12 @@ inductive ReflTransGen {α: Type} (r: EndoRel α): EndoRel α where
   | refl x:
       ReflTransGen r x x
 
-  | scoc x y z:
+  | snoc x y z:
       ReflTransGen r x y →
                r y z →
       ReflTransGen r x z
+
+-- r(X,Z) :- r(X,Y), r(Y,Z)
 
 -- Zero or one step.
 inductive ReflGen {α: Type} (r: EndoRel α): EndoRel α where
@@ -33,12 +43,12 @@ theorem ReflGen.toReflTransGen {α: Type} {r: EndoRel α} {x y: α}:
   intro h
   cases h with
   | refl _ => exact .refl _
-  | single _ _ hstep => exact .scoc _ _ _ (.refl _) hstep
+  | single _ _ hstep => exact .snoc _ _ _ (.refl _) hstep
 
 theorem ReflTransGen.single {α: Type} {r: EndoRel α} {x y: α}:
     r x y →
     r.ReflTransGen x y
-:= .scoc x x y (.refl x)
+:= snoc x x y (.refl x)
 
 theorem ReflTransGen.trans {α: Type} {r: EndoRel α} {x y z: α}:
     r.ReflTransGen x y →
@@ -48,6 +58,6 @@ theorem ReflTransGen.trans {α: Type} {r: EndoRel α} {x y z: α}:
   intro hxy hyz
   induction hyz with
   | refl _ => exact hxy
-  | scoc _ _ _ _ hstep ih => exact .scoc _ _ _ (ih hxy) hstep
+  | snoc _ _ _ _ hstep ih => exact snoc _ _ _ (ih hxy) hstep
 
 end Function
