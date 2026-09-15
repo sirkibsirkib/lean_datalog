@@ -19,7 +19,7 @@ def readStdin: IO String := do
 -- a proof that it computes `Program.model`, and `Program.model_unique` says
 -- a program has at most one model, swapping this line cannot change the
 -- answer — only how long it takes to get.
-def evaluator: Evaluator := Layerwise.evaluator
+def evaluator: Evaluator := Matching.evaluator
 
 -- Sorted, so the output is stable rather than in derivation order.
 def Program.report (p: Program): List String :=

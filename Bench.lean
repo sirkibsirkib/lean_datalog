@@ -52,21 +52,25 @@ def main (args: List String): IO UInt32 := do
   IO.println ""
   for (rname, rsrc) in rules do
     IO.println s!"{rname}"
-    IO.println s!"  {pad "data" 10}{pad "atoms" 8}{pad "stepwise" 11}{pad "layerwise" 11}speedup"
-    -- Tracked per evaluator, not per row: Stepwise gives out roughly an
-    -- order of magnitude sooner, and watching Layerwise carry on past that
-    -- point is the interesting part of the table.
+    IO.println s!"  {pad "data" 10}{pad "atoms" 8}{pad "stepwise" 11}{pad "layerwise" 11}\
+{pad "matching" 11}speedup"
+    -- Tracked per evaluator, not per row: Stepwise and Matching give out
+    -- roughly an order of magnitude sooner than Layerwise, and watching
+    -- Layerwise carry on past that point is the interesting part of the
+    -- table.
     let mut stopS := false
     let mut stopL := false
+    let mut stopM := false
     for (dname, dsrc) in data do
-      if stopS && stopL then
+      if stopS && stopL && stopM then
         IO.println s!"  {pad dname 10}(skipped)"
       else
         match parseProgram (rsrc ++ "\n" ++ dsrc) with
         | none => IO.println s!"  {pad dname 10}PARSE ERROR"
         | some p =>
           -- Layerwise first, being the cheap one: if it is already over
-          -- budget then Stepwise is hopeless and is not worth starting.
+          -- budget then Stepwise and Matching are hopeless and not worth
+          -- starting.
           let mut lTxt := "-"; let mut aTxt := "-"; let mut lms := 0
           if !stopL then
             let (ms, n) ← timeMs λ _ ↦ (Layerwise.saturate p).length
@@ -79,9 +83,16 @@ def main (args: List String): IO UInt32 := do
             if ms > budget then stopS := true
           else
             stopS := true
+          let mut mTxt := "-"
+          if !stopM && !stopL then
+            let (ms, _) ← timeMs λ _ ↦ (Matching.saturate p).length
+            mTxt := s!"{ms}ms"
+            if ms > budget then stopM := true
+          else
+            stopM := true
           let spd := if sms > 0 && lms > 0 then ratio sms lms else ""
           IO.println s!"  {pad dname 10}{pad aTxt 8}\
-{pad sTxt 11}{pad lTxt 11}{spd}"
+{pad sTxt 11}{pad lTxt 11}{pad mTxt 11}{spd}"
           (← IO.getStdout).flush
     IO.println ""
   return 0
