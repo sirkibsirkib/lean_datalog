@@ -9,3 +9,4 @@ import LeanDatalog.Eval.Step
 import LeanDatalog.Eval.Evaluators.Stepwise
 import LeanDatalog.Eval.Evaluators.Layerwise
 import LeanDatalog.Eval.Evaluators.Matching
+import LeanDatalog.Eval.Evaluators.SlowMatching

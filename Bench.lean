@@ -46,7 +46,8 @@ def main: IO UInt32 := do
     return 1
   for (rname, rsrc) in rules do
     IO.println s!"{rname}"
-    IO.println s!"  {pad "data" 10}{pad "atoms" 8}{pad "stepwise" 11}{pad "layerwise" 11}matching"
+    IO.println s!"  {pad "data" 10}{pad "atoms" 8}{pad "stepwise" 11}{pad "layerwise" 11}\
+{pad "matching" 11}slowmatching"
     for (dname, dsrc) in data do
       match parseProgram (rsrc ++ "\n" ++ dsrc) with
       | none => IO.println s!"  {pad dname 10}PARSE ERROR"
@@ -54,8 +55,9 @@ def main: IO UInt32 := do
         let (sms, _) ← timeMs λ _ ↦ (Stepwise.saturate p).length
         let (lms, n) ← timeMs λ _ ↦ (Layerwise.saturate p).length
         let (mms, _) ← timeMs λ _ ↦ (Matching.saturate p).length
+        let (slms, _) ← timeMs λ _ ↦ (SlowMatching.saturate p).length
         IO.println s!"  {pad dname 10}{pad (toString n) 8}\
-{pad s!"{sms}ms" 11}{pad s!"{lms}ms" 11}{mms}ms"
+{pad s!"{sms}ms" 11}{pad s!"{lms}ms" 11}{pad s!"{mms}ms" 11}{slms}ms"
         (← IO.getStdout).flush
     IO.println ""
   return 0

@@ -10,7 +10,19 @@ rule's variables and keeps the ones whose body atoms already sit in `kb` —
 the same immediate consequences a different way: walk a rule's body left to
 right, and at each atom try it against every element of `kb` in turn,
 growing a partial variable assignment and backtracking the instant two
-atoms disagree about what a variable is worth.
+atoms disagree about what a variable is worth. For `body = [p(X,Y), q(Y)]`
+against `kb = {g₁, g₂, g₃}`, the search looks like:
+
+           p(X,Y)                  — try every g ∈ kb for the first atom
+        ╱    |    ╲
+      g₁     g₂     g₃             — g₂ doesn't match p(X,Y): dead end
+      │      ✗      │
+    q(Y)           q(Y)            — continue each surviving branch
+    ╱  ╲            |
+   g₁   g₂          ✗              — no g matches q(Y) here either
+   ✗    ✓
+        │
+       ps                          — the one binding that matched all the way
 
 The partial assignment is `Variable → Option Constant`, but realised as a
 finite assoc list (`PartialSubst`) rather than a genuine function, so that
@@ -185,52 +197,35 @@ theorem matchArg_cases {ps: PartialSubst} {pat: Arg} {val: Constant} {ps': Parti
       simp only [hlook] at heq
       exact .inr (.inr ⟨v, rfl, hlook, (Option.some.inj heq).symm⟩)
 
--- `matchArg` never disturbs an existing binding, so functionality survives
--- it: either it leaves `ps` untouched, or it adds a binding for a variable
--- `lookup` just reported absent — and an absent variable cannot already
--- clash with anything in `ps`.
-theorem matchArg_functional {ps ps': PartialSubst} {pat: Arg} {val: Constant}
+-- What one successful argument match pins down, all at once: functionality
+-- survives it (either `ps` is untouched, or the one new binding cannot
+-- clash — `lookup` just reported the variable absent), `ps` only grows, and
+-- the pattern itself now agrees with `val`.
+theorem matchArg_sound {ps ps': PartialSubst} {pat: Arg} {val: Constant}
     (hfunc: ps.Functional) (heq: matchArg ps pat val = some ps'):
     ps'.Functional
+  ∧ (∀ v c, (v, c) ∈ ps → (v, c) ∈ ps')
+  ∧ (∀ v, pat = .inl v → (v, val) ∈ ps')
+  ∧ (∀ c, pat = .inr c → c = val)
 := by
   rcases matchArg_cases heq with ⟨c, hpat, hc, rfl⟩ | ⟨v, c, hpat, hlook, hc, rfl⟩ | ⟨v, hpat, hlook, rfl⟩
-  · exact hfunc
-  · exact hfunc
-  · intro v₁ c₁ c₂ h₁ h₂
-    cases h₁ with
-    | head _ =>
-      cases h₂ with
-      | head _ => rfl
-      | tail _ h₂ => exact absurd h₂ (PartialSubst.lookup_eq_none hlook c₂)
-    | tail _ h₁ =>
-      cases h₂ with
-      | head _ => exact absurd h₁ (PartialSubst.lookup_eq_none hlook c₁)
-      | tail _ h₂ => exact hfunc v₁ c₁ c₂ h₁ h₂
-
--- `matchArg` only ever grows `ps`.
-theorem matchArg_subset {ps ps': PartialSubst} {pat: Arg} {val: Constant}
-    (heq: matchArg ps pat val = some ps'):
-    ∀ v c, (v, c) ∈ ps → (v, c) ∈ ps'
-:= by
-  rcases matchArg_cases heq with ⟨c, hpat, hc, rfl⟩ | ⟨v, c, hpat, hlook, hc, rfl⟩ | ⟨v, hpat, hlook, rfl⟩
-  · exact λ _ _ h ↦ h
-  · exact λ _ _ h ↦ h
-  · exact λ _ _ h ↦ .tail _ h
-
--- What success actually pins down: a constant pattern equals `val`, and a
--- variable pattern ends up bound to `val` in the result.
-theorem matchArg_mem {ps ps': PartialSubst} {pat: Arg} {val: Constant}
-    (heq: matchArg ps pat val = some ps'):
-    (∀ v, pat = .inl v → (v, val) ∈ ps') ∧ (∀ c, pat = .inr c → c = val)
-:= by
-  rcases matchArg_cases heq with ⟨c, hpat, hc, rfl⟩ | ⟨v, c, hpat, hlook, hc, rfl⟩ | ⟨v, hpat, hlook, rfl⟩
-  · constructor
+  · refine ⟨hfunc, λ _ _ h ↦ h, ?_, ?_⟩
     · intro v' h; rw [hpat] at h; nomatch h
     · intro c' h; rw [hpat] at h; cases h; exact hc
-  · constructor
+  · refine ⟨hfunc, λ _ _ h ↦ h, ?_, ?_⟩
     · intro v' h; rw [hpat] at h; cases h; rw [← hc]; exact PartialSubst.lookup_mem hlook
     · intro c' h; rw [hpat] at h; nomatch h
-  · constructor
+  · refine ⟨?_, λ _ _ h ↦ .tail _ h, ?_, ?_⟩
+    · intro v₁ c₁ c₂ h₁ h₂
+      cases h₁ with
+      | head _ =>
+        cases h₂ with
+        | head _ => rfl
+        | tail _ h₂ => exact absurd h₂ (PartialSubst.lookup_eq_none hlook c₂)
+      | tail _ h₁ =>
+        cases h₂ with
+        | head _ => exact absurd h₁ (PartialSubst.lookup_eq_none hlook c₁)
+        | tail _ h₂ => exact hfunc v₁ c₁ c₂ h₁ h₂
     · intro v' h; rw [hpat] at h; cases h; exact .head _
     · intro c' h; rw [hpat] at h; nomatch h
 
@@ -267,19 +262,30 @@ theorem matchArg_compat {ps ps': PartialSubst} {pat: Arg} {σ: Subst} {val: Cons
     | head _ => simp only [hpat, Arg.grounding] at hval; exact hval.symm
     | tail _ h => exact hcompat v₁ c₁ h
 
--- Lift `matchArg_functional` across a whole argument list.
-theorem matchArgs_functional:
+-- `matchArg_sound`, lifted across a whole argument list by one induction —
+-- what were four separate lemmas (functionality, monotonicity, "every
+-- variable gets bound", and the grounding equation) all fall out of the
+-- same case split, so there is no reason to redo it four times.
+theorem matchArgs_sound:
   ∀ {pats: List Arg} {vals: List Constant} {ps ps': PartialSubst},
     ps.Functional →
     matchArgs ps pats vals = some ps' →
     ps'.Functional
+  ∧ (∀ v c, (v, c) ∈ ps → (v, c) ∈ ps')
+  ∧ (∀ v, (Sum.inl v: Arg) ∈ pats → ∃ c, (v, c) ∈ ps')
+  ∧ pats.map (λ pat ↦ Arg.grounding pat (Subst.ofAssoc ps')) = vals
 := by
   intro pats
   induction pats with
   | nil =>
     intro vals ps ps' hfunc heq
     cases vals with
-    | nil => simp only [matchArgs] at heq; cases heq; exact hfunc
+    | nil =>
+      simp only [matchArgs] at heq
+      cases heq
+      refine ⟨hfunc, λ _ _ h ↦ h, ?_, rfl⟩
+      intro v hv
+      nomatch hv
     | cons _ _ => simp only [matchArgs] at heq; cases heq
   | cons pat pats ih =>
     intro vals ps ps' hfunc heq
@@ -288,97 +294,26 @@ theorem matchArgs_functional:
     | cons val vals =>
       simp only [matchArgs, Option.bind_eq_some_iff] at heq
       obtain ⟨ps₁, hm, hrest⟩ := heq
-      exact ih (matchArg_functional hfunc hm) hrest
-
--- Lift `matchArg_subset` across a whole argument list.
-theorem matchArgs_subset:
-  ∀ {pats: List Arg} {vals: List Constant} {ps ps': PartialSubst},
-    matchArgs ps pats vals = some ps' →
-    ∀ v c, (v, c) ∈ ps → (v, c) ∈ ps'
-:= by
-  intro pats
-  induction pats with
-  | nil =>
-    intro vals ps ps' heq
-    cases vals with
-    | nil => simp only [matchArgs] at heq; cases heq; exact λ _ _ h ↦ h
-    | cons _ _ => simp only [matchArgs] at heq; cases heq
-  | cons pat pats ih =>
-    intro vals ps ps' heq
-    cases vals with
-    | nil => simp only [matchArgs] at heq; cases heq
-    | cons val vals =>
-      simp only [matchArgs, Option.bind_eq_some_iff] at heq
-      obtain ⟨ps₁, hm, hrest⟩ := heq
-      exact λ v c h ↦ ih hrest v c (matchArg_subset hm v c h)
-
--- Every variable occurring among the patterns ends up bound in the result.
-theorem matchArgs_vars_mem:
-  ∀ {pats: List Arg} {vals: List Constant} {ps ps': PartialSubst},
-    matchArgs ps pats vals = some ps' →
-    ∀ v, (Sum.inl v: Arg) ∈ pats → ∃ c, (v, c) ∈ ps'
-:= by
-  intro pats
-  induction pats with
-  | nil => intro vals ps ps' _ v hv; nomatch hv
-  | cons pat pats ih =>
-    intro vals ps ps' heq v hv
-    cases vals with
-    | nil => simp only [matchArgs] at heq; cases heq
-    | cons val vals =>
-      simp only [matchArgs, Option.bind_eq_some_iff] at heq
-      obtain ⟨ps₁, hm, hrest⟩ := heq
-      cases hv with
-      | head _ =>
-        obtain ⟨hmemv, _⟩ := matchArg_mem hm
-        exact ⟨val, matchArgs_subset hrest v val (hmemv v rfl)⟩
-      | tail _ hv => exact ih hrest v hv
-
--- The payoff: grounding the whole pattern list by the FINAL substitution
--- recovers `vals` exactly. Repeated variables are handled for free, since
--- the conclusion is one equation about one substitution rather than a
--- membership fact per occurrence.
-theorem matchArgs_grounds:
-  ∀ {pats: List Arg} {vals: List Constant} {ps ps': PartialSubst},
-    ps.Functional →
-    matchArgs ps pats vals = some ps' →
-    pats.map (λ pat ↦ Arg.grounding pat (Subst.ofAssoc ps')) = vals
-:= by
-  intro pats
-  induction pats with
-  | nil =>
-    intro vals ps ps' _ heq
-    cases vals with
-    | nil => rfl
-    | cons _ _ => simp only [matchArgs] at heq; cases heq
-  | cons pat pats ih =>
-    intro vals ps ps' hfunc heq
-    cases vals with
-    | nil => simp only [matchArgs] at heq; cases heq
-    | cons val vals =>
-      simp only [matchArgs, Option.bind_eq_some_iff] at heq
-      obtain ⟨ps₁, hm, hrest⟩ := heq
-      have hfunc₁ := matchArg_functional hfunc hm
-      have hfunc' := matchArgs_functional hfunc₁ hrest
-      have hgr := ih hfunc₁ hrest
-      have hval: Arg.grounding pat (Subst.ofAssoc ps') = val := by
-        obtain ⟨hvarcase, hconstcase⟩ := matchArg_mem hm
-        cases pat with
-        | inr c =>
-          have hcv := hconstcase c rfl
-          simp only [Arg.grounding, hcv]
-        | inl v =>
-          have hmem := matchArgs_subset hrest v val (hvarcase v rfl)
-          simp only [Arg.grounding]
-          exact PartialSubst.ofAssoc_of_mem hfunc' hmem
-      simp only [List.map_cons, hval, hgr]
+      obtain ⟨hfunc₁, hsub₁, hmem₁, hconst₁⟩ := matchArg_sound hfunc hm
+      obtain ⟨hfunc', hsub', hvars', hgr⟩ := ih hfunc₁ hrest
+      refine ⟨hfunc', λ v c h ↦ hsub' v c (hsub₁ v c h), ?_, ?_⟩
+      · intro v hv
+        cases hv with
+        | head _ => exact ⟨val, hsub' v val (hmem₁ v rfl)⟩
+        | tail _ hv => exact hvars' v hv
+      · have hval: Arg.grounding pat (Subst.ofAssoc ps') = val := by
+          cases pat with
+          | inr c => simp only [Arg.grounding, hconst₁ c rfl]
+          | inl v =>
+            simp only [Arg.grounding]
+            exact PartialSubst.ofAssoc_of_mem hfunc' (hsub' v val (hmem₁ v rfl))
+        simp only [List.map_cons, hval, hgr]
 
 -- Completeness, lifted across a whole argument list: matching against
 -- exactly the values `σ` grounds them to always succeeds, and the result
--- stays compatible with `σ`. (Subset-growth and "every variable gets
--- bound" are already available from `matchArgs_subset`/`matchArgs_vars_mem`
--- once a witness like this one is in hand, so there is no need to
--- reprove them here.)
+-- stays compatible with `σ`. (Monotonicity and "every variable gets bound"
+-- are already available from `matchArgs_sound` once a witness like this
+-- one is in hand, so there is no need to reprove them here.)
 theorem matchArgs_succeeds {ps: PartialSubst} {σ: Subst}:
   ∀ {pats: List Arg},
     (∀ v c, (v, c) ∈ ps → σ v = c) →
@@ -397,48 +332,23 @@ theorem matchArgs_succeeds {ps: PartialSubst} {σ: Subst}:
     simp only [List.map_cons, matchArgs, Option.bind_eq_some_iff]
     exact ⟨ps₁, hm, hrest⟩
 
-theorem matchAtom_functional {ps ps': PartialSubst} {a: Atom} {g: GrAtom}
+-- `matchArgs_sound`, lifted to a whole atom: matching `a` against `g`
+-- either fails outright on mismatched predicates, or is exactly
+-- `matchArgs` on `a`'s arguments against `g`'s constants — so this is
+-- `matchArgs_sound` plus `Atom.args_eq_consts_map_inr` (a ground atom's
+-- `args` really are its `consts` reinjected) closed by structure eta.
+theorem matchAtom_sound {ps ps': PartialSubst} {a: Atom} {g: GrAtom}
     (hfunc: ps.Functional) (heq: matchAtom ps a g = some ps'):
     ps'.Functional
-:= by
-  simp only [matchAtom] at heq
-  by_cases hpred: a.pred = g.val.pred
-  · rw [if_pos hpred] at heq; exact matchArgs_functional hfunc heq
-  · rw [if_neg hpred] at heq; cases heq
-
-theorem matchAtom_subset {ps ps': PartialSubst} {a: Atom} {g: GrAtom}
-    (heq: matchAtom ps a g = some ps'):
-    ∀ v c, (v, c) ∈ ps → (v, c) ∈ ps'
-:= by
-  simp only [matchAtom] at heq
-  by_cases hpred: a.pred = g.val.pred
-  · rw [if_pos hpred] at heq; exact matchArgs_subset heq
-  · rw [if_neg hpred] at heq; cases heq
-
-theorem matchAtom_vars_mem {ps ps': PartialSubst} {a: Atom} {g: GrAtom}
-    (heq: matchAtom ps a g = some ps'):
-    ∀ v ∈ a.vars, ∃ c, (v, c) ∈ ps'
+  ∧ (∀ v c, (v, c) ∈ ps → (v, c) ∈ ps')
+  ∧ (∀ v ∈ a.vars, ∃ c, (v, c) ∈ ps')
+  ∧ Subst.grounded a (Subst.ofAssoc ps') = g
 := by
   simp only [matchAtom] at heq
   by_cases hpred: a.pred = g.val.pred
   · rw [if_pos hpred] at heq
-    intro v hv
-    exact matchArgs_vars_mem heq v (Atom.mem_vars.mp hv)
-  · rw [if_neg hpred] at heq; cases heq
-
--- The core soundness fact about matching one atom: success grounds `a`
--- into exactly `g`, not merely into something with the right constants at
--- the right positions. Combines `matchArgs_grounds` (pointwise agreement)
--- with `Atom.args_eq_consts_map_inr` (a ground atom's `args` really are
--- `consts` reinjected), then closes by structure eta on `Atom`.
-theorem matchAtom_grounds {ps ps': PartialSubst} {a: Atom} {g: GrAtom}
-    (hfunc: ps.Functional) (heq: matchAtom ps a g = some ps'):
-    Subst.grounded a (Subst.ofAssoc ps') = g
-:= by
-  simp only [matchAtom] at heq
-  by_cases hpred: a.pred = g.val.pred
-  · rw [if_pos hpred] at heq
-    have hgr := matchArgs_grounds hfunc heq
+    obtain ⟨hfunc', hsub', hvars', hgr⟩ := matchArgs_sound hfunc heq
+    refine ⟨hfunc', hsub', λ v hv ↦ hvars' v (Atom.mem_vars.mp hv), ?_⟩
     apply Subtype.ext
     show ({ pred := a.pred, args := a.args.map (λ arg ↦ Subst.ground arg (Subst.ofAssoc ps')) }: Atom)
         = g.val
@@ -456,7 +366,6 @@ theorem matchAtom_grounds {ps ps': PartialSubst} {a: Atom} {g: GrAtom}
 theorem matchAtom_complete {ps: PartialSubst} {a: Atom} {σ: Subst}
     (hcompat: ∀ v c, (v, c) ∈ ps → σ v = c):
     ∃ ps', matchAtom ps a (Subst.grounded a σ) = some ps'
-    ∧ (∀ v c, (v, c) ∈ ps → (v, c) ∈ ps')
     ∧ (∀ v c, (v, c) ∈ ps' → σ v = c)
 := by
   obtain ⟨ps', hm, hcompat'⟩ := matchArgs_succeeds (ps := ps) (σ := σ) (pats := a.args) hcompat
@@ -465,7 +374,7 @@ theorem matchAtom_complete {ps: PartialSubst} {a: Atom} {σ: Subst}
     simp only [matchAtom]
     rw [if_pos hpred, Atom.consts_grounded]
     exact hm
-  exact ⟨ps', hma, matchArgs_subset hm, hcompat'⟩
+  exact ⟨ps', hma, hcompat'⟩
 
 end Matching
 
@@ -492,15 +401,18 @@ theorem Atom.grounded_stable {b: Atom} {ps ps': Matching.PartialSubst} {g: GrAto
 
 namespace Matching
 
--- Soundness of the whole backtracking walk: whatever partial substitution
--- it settles on is functional, extends the one it started from, and
--- grounds every antecedent it walked into something already in `kb`.
+-- Soundness of the whole backtracking walk, all in one induction over the
+-- body: whatever partial substitution it settles on is functional, extends
+-- the one it started from, has bound every variable of every antecedent
+-- walked past, and grounds each of those antecedents into something
+-- already in `kb`.
 theorem matchBody_sound {kb: List GrAtom}:
   ∀ {body: List Atom} {ps ps': PartialSubst},
     ps.Functional →
     ps' ∈ matchBody kb ps body →
     ps'.Functional
   ∧ (∀ v c, (v, c) ∈ ps → (v, c) ∈ ps')
+  ∧ (∀ b ∈ body, ∀ v ∈ b.vars, ∃ c, (v, c) ∈ ps')
   ∧ (∀ b ∈ body, Subst.grounded b (Subst.ofAssoc ps') ∈ kb)
 := by
   intro body
@@ -509,7 +421,9 @@ theorem matchBody_sound {kb: List GrAtom}:
     intro ps ps' hfunc hmem
     simp only [matchBody, List.mem_singleton] at hmem
     subst hmem
-    exact ⟨hfunc, λ _ _ h ↦ h, λ b hb ↦ nomatch hb⟩
+    refine ⟨hfunc, λ _ _ h ↦ h, ?_, ?_⟩
+    · intro b hb; nomatch hb
+    · intro b hb; nomatch hb
   | cons b rest ih =>
     intro ps ps' hfunc hmem
     simp only [matchBody, List.mem_flatMap] at hmem
@@ -518,70 +432,26 @@ theorem matchBody_sound {kb: List GrAtom}:
     | none => rw [hma] at hmem; nomatch hmem
     | some ps₁ =>
       rw [hma] at hmem
-      have hfunc₁ := matchAtom_functional hfunc hma
-      obtain ⟨hfunc', hsub', hbodyrest⟩ := ih hfunc₁ hmem
-      have hsub := matchAtom_subset hma
-      refine ⟨hfunc', λ v c h ↦ hsub' v c (hsub v c h), λ b' hb' ↦ ?_⟩
-      cases hb' with
-      | head _ =>
-        have hg1 := matchAtom_grounds hfunc hma
-        have hvars := matchAtom_vars_mem hma
-        rw [Atom.grounded_stable hfunc₁ hfunc' hvars hsub' hg1]
-        exact hg
-      | tail _ hb' => exact hbodyrest b' hb'
-
--- Plain monotonicity of the walk, with no functionality needed: whatever
--- was on file when it started is still on file wherever it ends up.
-theorem matchBody_subset {kb: List GrAtom}:
-  ∀ {body: List Atom} {ps ps': PartialSubst},
-    ps' ∈ matchBody kb ps body →
-    ∀ v c, (v, c) ∈ ps → (v, c) ∈ ps'
-:= by
-  intro body
-  induction body with
-  | nil =>
-    intro ps ps' hmem
-    simp only [matchBody, List.mem_singleton] at hmem
-    subst hmem
-    exact λ _ _ h ↦ h
-  | cons b rest ih =>
-    intro ps ps' hmem
-    simp only [matchBody, List.mem_flatMap] at hmem
-    obtain ⟨g, hg, hmem⟩ := hmem
-    cases hma: matchAtom ps b g with
-    | none => simp only [hma] at hmem; nomatch hmem
-    | some ps₁ =>
-      simp only [hma] at hmem
-      exact λ v c h ↦ ih hmem v c (matchAtom_subset hma v c h)
-
--- Every variable of every antecedent the walk got past ends up bound.
-theorem matchBody_vars_mem {kb: List GrAtom}:
-  ∀ {body: List Atom} {ps ps': PartialSubst},
-    ps' ∈ matchBody kb ps body →
-    ∀ b ∈ body, ∀ v ∈ b.vars, ∃ c, (v, c) ∈ ps'
-:= by
-  intro body
-  induction body with
-  | nil => intro ps ps' _ b hb; nomatch hb
-  | cons b rest ih =>
-    intro ps ps' hmem b' hb' v hv
-    simp only [matchBody, List.mem_flatMap] at hmem
-    obtain ⟨g, hg, hmem⟩ := hmem
-    cases hma: matchAtom ps b g with
-    | none => simp only [hma] at hmem; nomatch hmem
-    | some ps₁ =>
-      simp only [hma] at hmem
-      cases hb' with
-      | head _ =>
-        obtain ⟨c, hc⟩ := matchAtom_vars_mem hma v hv
-        exact ⟨c, matchBody_subset hmem v c hc⟩
-      | tail _ hb' => exact ih hmem b' hb' v hv
+      obtain ⟨hfunc₁, hsub₁, hvars₁, hg1⟩ := matchAtom_sound hfunc hma
+      obtain ⟨hfunc', hsub', hvarsrest, hbodyrest⟩ := ih hfunc₁ hmem
+      refine ⟨hfunc', λ v c h ↦ hsub' v c (hsub₁ v c h), λ b' hb' v hv ↦ ?_, λ b' hb' ↦ ?_⟩
+      · cases hb' with
+        | head _ =>
+          obtain ⟨c, hc⟩ := hvars₁ v hv
+          exact ⟨c, hsub' v c hc⟩
+        | tail _ hb' => exact hvarsrest b' hb' v hv
+      · cases hb' with
+        | head _ =>
+          rw [Atom.grounded_stable hfunc₁ hfunc' hvars₁ hsub' hg1]
+          exact hg
+        | tail _ hb' => exact hbodyrest b' hb'
 
 -- Completeness of the whole walk: if `σ` fires the body against `kb`, the
 -- walk finds SOME partial substitution — not necessarily `σ` itself, but
 -- one that agrees with `σ` everywhere it is defined, which is exactly what
--- `matchBody_vars_mem` + `hcompat` need to reconstruct `σ`'s ground
--- instance of anything built from this body's variables.
+-- `matchBody_sound`'s "every variable gets bound" fact plus `hcompat` need
+-- to reconstruct `σ`'s ground instance of anything built from this body's
+-- variables.
 theorem matchBody_complete {kb: List GrAtom} {σ: Subst}:
   ∀ {body: List Atom} {ps: PartialSubst},
     ps.Functional →
@@ -598,8 +468,8 @@ theorem matchBody_complete {kb: List GrAtom} {σ: Subst}:
   | cons b rest ih =>
     intro ps hfunc hcompat hbodykb
     have hgkb: Subst.grounded b σ ∈ kb := hbodykb b (.head _)
-    obtain ⟨ps₁, hma, _, hcompat₁⟩ := matchAtom_complete (a := b) hcompat
-    have hfunc₁ := matchAtom_functional hfunc hma
+    obtain ⟨ps₁, hma, hcompat₁⟩ := matchAtom_complete (a := b) hcompat
+    have hfunc₁ := (matchAtom_sound hfunc hma).1
     obtain ⟨ps', hmem', hcompat'⟩ :=
       ih hfunc₁ hcompat₁ (λ b' hb' ↦ hbodykb b' (.tail _ hb'))
     refine ⟨ps', ?_, hcompat'⟩
@@ -608,18 +478,80 @@ theorem matchBody_complete {kb: List GrAtom} {σ: Subst}:
     simp only [hma]
     exact hmem'
 
+-- The immediate-consequence computation shared by `Program.matchStepAtoms`
+-- below and its Herbrand-base-filtered cousin in SlowMatching.lean: every
+-- rule's head, grounded by every substitution the backtracking walk finds
+-- for its body.
+def stepImage (p: Program) (kb: List GrAtom): List GrAtom :=
+  p.flatMap λ r ↦ (matchBody kb [] r.body).map λ ps ↦ Subst.grounded r.head (Subst.ofAssoc ps)
+
+-- The bare existence fact, needing nothing about `kb` at all: every atom
+-- the walk produces is some rule's head under a substitution whose body
+-- fires against `kb`. Shared by `mem_stepImage` below (which additionally
+-- confines that substitution to `p.consts`, given `kb` bounded) and by
+-- SlowMatching.lean's reachability proof (which needs no such confinement).
+theorem mem_stepImage_core {p: Program} {kb: List GrAtom} {a: GrAtom}:
+    a ∈ stepImage p kb →
+    ∃ r ∈ p, ∃ σ: Subst, (∀ b ∈ r.body, Subst.grounded b σ ∈ kb) ∧ a = Subst.grounded r.head σ
+:= by
+  intro ha
+  obtain ⟨r, hr, ha⟩ := List.mem_flatMap.mp ha
+  obtain ⟨ps, hps, rfl⟩ := List.mem_map.mp ha
+  obtain ⟨_, _, _, hbody⟩ := matchBody_sound PartialSubst.functional_nil hps
+  exact ⟨r, hr, Subst.ofAssoc ps, hbody, rfl⟩
+
+-- Soundness, in the same shape as `Program.mem_stepAtoms` (Step.lean): with
+-- `kb` bounded by the Herbrand base, that substitution is also confined to
+-- `p.consts` on the rule's variables — here needing that hypothesis, since
+-- (unlike the candidate-substitution approach) the values the substitution
+-- takes come from `kb` itself rather than from `p.consts` directly.
+theorem mem_stepImage {p: Program} {kb: List GrAtom} {a: GrAtom}
+    (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base):
+    a ∈ stepImage p kb →
+    ∃ r ∈ p, ∃ σ: Subst,
+      (∀ v ∈ r.vars, σ v ∈ p.consts)
+    ∧ (∀ b ∈ r.body, Subst.grounded b σ ∈ kb)
+    ∧ a = Subst.grounded r.head σ
+:= by
+  intro ha
+  obtain ⟨r, hr, σ, hbody, rfl⟩ := mem_stepImage_core ha
+  exact ⟨r, hr, σ, Program.subst_consts hbound hbody, hbody, rfl⟩
+
+-- COMPLETENESS: if `σ` fires a rule's body against `kb`, the walk already
+-- finds a substitution whose grounding of that rule's head AGREES with
+-- `σ`'s. Shared by both `Program.matchStepAtoms` (unconditionally — see
+-- `mem_stepImage_of_fires`) and its filtered cousin (which additionally
+-- has to check the result survives the filter).
+theorem stepImage_grounds_head {kb: List GrAtom} {r: Rule} {σ: Subst}
+    (hbody: ∀ b ∈ r.body, Subst.grounded b σ ∈ kb):
+    ∃ ps' ∈ matchBody kb [] r.body,
+      Subst.grounded r.head (Subst.ofAssoc ps') = Subst.grounded r.head σ
+:= by
+  obtain ⟨ps', hmem', hcompat'⟩ :=
+    matchBody_complete PartialSubst.functional_nil (λ v c h ↦ nomatch h) hbody
+  obtain ⟨hfunc', _, hvars', _⟩ := matchBody_sound PartialSubst.functional_nil hmem'
+  refine ⟨ps', hmem', ?_⟩
+  apply Subtype.ext
+  apply Atom.ground_congr
+  intro v hv
+  obtain ⟨b, hb, hbv⟩ := r.safe v hv
+  obtain ⟨c, hc⟩ := hvars' b hb v hbv
+  rw [PartialSubst.ofAssoc_of_mem hfunc' hc]
+  exact (hcompat' v c hc).symm
+
+theorem mem_stepImage_of_fires {p: Program} {r: Rule} {σ: Subst} {kb: List GrAtom}
+    (hr: r ∈ p) (hbody: ∀ b ∈ r.body, Subst.grounded b σ ∈ kb):
+    Subst.grounded r.head σ ∈ stepImage p kb
+:= by
+  obtain ⟨ps', hmem', heq⟩ := stepImage_grounds_head hbody
+  rw [← heq]
+  exact List.mem_flatMap.mpr ⟨r, hr, List.mem_map.mpr ⟨ps', hmem', rfl⟩⟩
+
 end Matching
 
 def Program.matchStepAtoms (p: Program) (kb: List GrAtom): List GrAtom :=
-  p.flatMap λ r ↦
-    (Matching.matchBody kb [] r.body).map λ ps ↦ Subst.grounded r.head (Subst.ofAssoc ps)
+  Matching.stepImage p kb
 
--- Soundness, in the same shape as `Program.mem_stepAtoms` (Step.lean): every
--- atom the matcher produces is some rule's head under a substitution whose
--- body fires against `kb` — here needing `kb` bounded by the Herbrand base,
--- since (unlike the candidate-substitution approach) the values this
--- substitution takes come from `kb` itself rather than from `p.consts`
--- directly.
 theorem Program.mem_matchStepAtoms {p: Program} {kb: List GrAtom} {a: GrAtom}
     (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base):
     a ∈ p.matchStepAtoms kb →
@@ -627,16 +559,10 @@ theorem Program.mem_matchStepAtoms {p: Program} {kb: List GrAtom} {a: GrAtom}
       (∀ v ∈ r.vars, σ v ∈ p.consts)
     ∧ (∀ b ∈ r.body, Subst.grounded b σ ∈ kb)
     ∧ a = Subst.grounded r.head σ
-:= by
-  intro ha
-  unfold Program.matchStepAtoms at ha
-  obtain ⟨r, hr, ha⟩ := List.mem_flatMap.mp ha
-  obtain ⟨ps, hps, rfl⟩ := List.mem_map.mp ha
-  obtain ⟨_, _, hbody⟩ := Matching.matchBody_sound Matching.PartialSubst.functional_nil hps
-  exact ⟨r, hr, Subst.ofAssoc ps, Program.subst_consts hbound hbody, hbody, rfl⟩
+:= Matching.mem_stepImage hbound
 
--- ...and so, exactly as for `Program.stepAtoms`, everything the matcher
--- produces lands in the Herbrand base — GIVEN `kb` already does.
+-- ...and so, exactly as for `Program.stepAtoms`, everything the walk
+-- produces lands in the Herbrand base — given `kb` already does.
 theorem Program.matchStepAtoms_mem_herbrand_base {p: Program} {kb: List GrAtom} {a: GrAtom}
     (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base):
     a ∈ p.matchStepAtoms kb →
@@ -644,10 +570,7 @@ theorem Program.matchStepAtoms_mem_herbrand_base {p: Program} {kb: List GrAtom} 
 := by
   intro ha
   obtain ⟨r, hr, σ, hcs, _, rfl⟩ := Program.mem_matchStepAtoms hbound ha
-  refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
-  refine Atom.mem_groundings (λ v hv ↦ hcs v ?_)
-  obtain ⟨b, hb, hbv⟩ := r.safe v hv
-  exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
+  exact Program.grounded_head_mem_herbrand_base hr hcs
 
 -- COMPLETENESS: if any substitution fires a rule against `kb`, the walk
 -- already produces that head — the payoff of matching rather than blind
@@ -656,24 +579,9 @@ theorem Program.matchStepAtoms_mem_herbrand_base {p: Program} {kb: List GrAtom} 
 -- directly rather than reconstructing a `p.consts`-confined candidate, so
 -- there is nothing to confine.
 theorem Program.mem_matchStepAtoms_of_fires {p: Program} {r: Rule} {σ: Subst} {kb: List GrAtom}
-    (hr: r ∈ p)
-    (hbody: ∀ b ∈ r.body, Subst.grounded b σ ∈ kb):
+    (hr: r ∈ p) (hbody: ∀ b ∈ r.body, Subst.grounded b σ ∈ kb):
     Subst.grounded r.head σ ∈ p.matchStepAtoms kb
-:= by
-  obtain ⟨ps', hmem', hcompat'⟩ :=
-    Matching.matchBody_complete Matching.PartialSubst.functional_nil
-      (λ v c h ↦ nomatch h) hbody
-  obtain ⟨hfunc', _, _⟩ := Matching.matchBody_sound Matching.PartialSubst.functional_nil hmem'
-  have heq: Subst.grounded r.head (Subst.ofAssoc ps') = Subst.grounded r.head σ := by
-    apply Subtype.ext
-    apply Atom.ground_congr
-    intro v hv
-    obtain ⟨b, hb, hbv⟩ := r.safe v hv
-    obtain ⟨c, hc⟩ := Matching.matchBody_vars_mem hmem' b hb v hbv
-    rw [Matching.PartialSubst.ofAssoc_of_mem hfunc' hc]
-    exact (hcompat' v c hc).symm
-  rw [← heq]
-  exact List.mem_flatMap.mpr ⟨r, hr, List.mem_map.mpr ⟨ps', hmem', rfl⟩⟩
+:= Matching.mem_stepImage_of_fires hr hbody
 
 -- The program `p(a).  q(X) :- p(X).`, as in Step.lean.
 private def X: Variable := ⟨"X", by decide⟩
@@ -695,29 +603,26 @@ namespace Matching
 Saturation itself, fuelled rather than well-founded.
 
 Each tick is one `Program.matchStepAtoms` call, exactly like Stepwise.lean's
-loop. The difference is why it terminates. Step.lean's
-`stepAtoms_mem_herbrand_base` needs no hypothesis on `kb`, so Stepwise.lean
-can let Lean's well-founded recursion machinery track the decreasing measure
-directly. `matchStepAtoms_mem_herbrand_base` above needs `kb` already
-bounded — a fact only available INSIDE a correctness proof, not at the point
-`saturateGo` is defined — and threading it through a `termination_by`
-obligation runs into a real limitation of Lean's equation compiler (the
-auto-generated recursive-call proof term does not survive being generalised
-for a later rewrite). An earlier version of this file worked around that by
-filtering every candidate down to the Herbrand base inside `matchStepAtoms`
-itself; that made the recursion well-founded again, but at the cost of an
-`O(|herbrand_base|)` membership check per candidate PER TICK, which — since
-`herbrand_base` grows with the square of the constants in play — dominated
-the whole computation and defeated the point of matching in the first place.
-
-Fuelling the recursion with a `Nat` sidesteps the problem entirely: a plain
+loop — the only difference is what makes it terminate. Stepwise.lean lets
+Lean's well-founded recursion track the decreasing "unseen Herbrand-base
+atoms" measure directly, because `Program.stepAtoms_mem_herbrand_base` needs
+no hypothesis on `kb`. `Program.matchStepAtoms_mem_herbrand_base` above
+DOES need `kb` already bounded, and that fact is only available inside a
+correctness proof, not at the point `saturateGo` is defined — threading it
+through a `termination_by` obligation runs into a real limitation of Lean's
+equation compiler (the recursive call's auto-generated proof term does not
+survive being generalised for a later rewrite in `saturateGo_fixpoint`
+below). Fuelling the recursion with a `Nat` sidesteps this: a plain
 structural recursion on `Nat` needs no termination proof at all, so
-`matchStepAtoms` can go back to being unfiltered, and boundedness becomes an
-ordinary post-hoc induction instead of a proof obligation baked into the
-definition. `p.herbrand_base.length` is always enough fuel —
-`saturateGo_fixpoint` below is where that is made precise, via the same
-strictly-decreasing-unseen-count measure Stepwise.lean's `termination_by`
-already uses.
+boundedness becomes an ordinary post-hoc induction instead of a proof
+obligation baked into the definition. `p.herbrand_base.length` is always
+enough fuel; `saturateGo_fixpoint` is where that gets made precise, via the
+same strictly-decreasing-unseen-count measure Stepwise.lean's
+`termination_by` uses:
+
+  fuel   3        2         1           0
+        kb ──▸ {a} ──▸ {a,b} ──▸ {a,b,c} ──▸ {a,b,c}   (find? = none: done early)
+             +a       +b         +c              ◂── remaining fuel goes unused
 -/
 def saturateGo (p: Program): Nat → List GrAtom → List GrAtom
   | 0, kb => kb

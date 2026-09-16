@@ -70,6 +70,18 @@ theorem Program.mem_stepAtoms {p: Program} {kb: List GrAtom}
   · rw [if_neg hcond] at heq
     cases heq
 
+-- A rule's head, grounded by a substitution confined to `p.consts` on the
+-- rule's own variables, lands in the Herbrand base — the fact common to
+-- every evaluator's "stays within the base" proof, however it produces σ.
+theorem Program.grounded_head_mem_herbrand_base {p: Program} {r: Rule} {σ: Subst}
+    (hr: r ∈ p) (hcs: ∀ v ∈ r.vars, σ v ∈ p.consts):
+    Subst.grounded r.head σ ∈ p.herbrand_base
+:= by
+  refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
+  refine Atom.mem_groundings (λ v hv ↦ hcs v ?_)
+  obtain ⟨b, hb, hbv⟩ := r.safe v hv
+  exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
+
 -- ...and so lands in the Herbrand base, which is what bounds the loop.
 theorem Program.stepAtoms_mem_herbrand_base {p: Program}
     {kb: List GrAtom} {a: GrAtom}:
@@ -78,10 +90,7 @@ theorem Program.stepAtoms_mem_herbrand_base {p: Program}
 := by
   intro ha
   obtain ⟨r, hr, σ, hcs, _, rfl⟩ := Program.mem_stepAtoms ha
-  refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
-  refine Atom.mem_groundings (λ v hv ↦ hcs v ?_)
-  obtain ⟨b, hb, hbv⟩ := r.safe v hv
-  exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
+  exact Program.grounded_head_mem_herbrand_base hr hcs
 
 -- A substitution that fires `r` against `kb` can only have used constants
 -- from `p.consts`, provided `kb` itself respects the Herbrand bound: each
