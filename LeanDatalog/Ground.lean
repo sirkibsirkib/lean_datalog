@@ -1,17 +1,19 @@
 import LeanDatalog.Syntax
 
+-- intuitively: syntactic rule you write + subst = semantic rule you apply
 abbrev Subst: Type := Variable → Constant
 
+-- "grounded" property of `T` values and creating grounded values.
 class Groundable (T: Type) where
-  grounded: T → Bool
+  grounded: T → Bool -- can decide if something is grounded
   ground: Subst → T → T
   ground_grounded: ∀ σ t, grounded (ground σ t)
   ground_idemp:    ∀ σ t, ground σ (ground σ t) = ground σ t
 
--- `abbrev`, not `def`: instance search only unfolds reducible definitions, so
--- as a `def` this type would block `DecidableEq GrAtom` and every
--- other instance that has to see the underlying subtype.
-abbrev Grounded   (T: Type) [i: Groundable T] := { t // i.grounded t }
+-- subtype of `T` with only the grounded elements
+abbrev Grounded  (T: Type) [i: Groundable T] := { t // i.grounded t }
+
+-- utility; "ground" is now a method of the substitution function
 def Subst.ground {T: Type} [i: Groundable T] (t: T) (σ: Subst): T :=
   i.ground σ t
 
@@ -78,7 +80,4 @@ instance: Groundable Rule where
     . intro a h
       apply Groundable.ground_idemp
 
--- The atoms a knowledge base can hold. Everything downstream works in this
--- type rather than `Atom`: only printing and an atom's internal argument
--- list have any business with the ungrounded form.
 abbrev GrAtom := Grounded Atom

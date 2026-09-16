@@ -1,6 +1,6 @@
 abbrev Rel α β := α → β → Prop
 
-example: Rel Nat Nat := λ m n ↦ m = n
+example (T: Type): Rel T T := Eq
 def all_nat: Rel Nat Nat := λ _ _ ↦ True
 
 example: all_nat 5 3 := by
@@ -9,13 +9,13 @@ example: all_nat 5 3 := by
 
 abbrev EndoRel α := Rel α α
 
-/-
-The reflexive-transitive and reflexive closures of a relation, and just
-enough API to chain steps together.
--/
+example: EndoRel Nat := all_nat
+
 
 namespace Function
 
+-- Reflexive transitive closure of a given relation:
+-- transforms one α-endorelation into another
 inductive ReflTransGen {α: Type} (r: EndoRel α): EndoRel α where
   | refl x:
       ReflTransGen r x x
@@ -26,6 +26,15 @@ inductive ReflTransGen {α: Type} (r: EndoRel α): EndoRel α where
       ReflTransGen r x z
 
 -- r(X,Z) :- r(X,Y), r(Y,Z)
+
+example: EndoRel Nat → EndoRel Nat := ReflTransGen
+example: EndoRel Nat := ReflTransGen all_nat
+
+example: ReflTransGen all_nat 6 6 := ReflTransGen.refl 6
+example :=
+  let h1: ReflTransGen all_nat 5 5 := .refl 5
+  let h2:              all_nat 6 6 := .intro
+  (.snoc 5 5 6 h1 h2: ReflTransGen all_nat 5 6)
 
 -- Zero or one step.
 inductive ReflGen {α: Type} (r: EndoRel α): EndoRel α where
