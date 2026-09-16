@@ -9,8 +9,9 @@ increasing size. Every (rules, data) pair is concatenated, parsed once, and
 evaluated by each `Evaluator`, so adding a workload means adding a file.
 
 Nothing is asserted about the timings — they belong to the machine, not to
-the source. What is recorded is the METHOD. A cell that exceeds the budget
-stops that row, so a slow machine simply reports less.
+the source. What is recorded is the METHOD. Every cell runs to completion,
+however long that takes, so a slow machine just waits longer rather than
+reporting less.
 -/
 
 -- Run `act` and report how long it took.
@@ -34,65 +35,27 @@ def readPrograms (dir: System.FilePath): IO (List (String × String)) := do
   let sorted := lp.mergeSort λ a b ↦ a.fileName ≤ b.fileName
   sorted.mapM λ e ↦ do return (e.fileName, ← IO.FS.readFile e.path)
 
--- One decimal place, without floats.
-def ratio (a b: Nat): String :=
-  if b == 0 then "  n/a" else s!"{a * 10 / b / 10}.{a * 10 / b % 10}x"
-
 def pad (s: String) (w: Nat): String :=
   s ++ "".pushn ' ' (w - s.length)
 
-def main (args: List String): IO UInt32 := do
-  let budget := (args.head?.bind String.toNat?).getD 300
+def main: IO UInt32 := do
   let rules ← readPrograms "benchmark/rules"
   let data ← readPrograms "benchmark/data"
   if rules.isEmpty || data.isEmpty then
     IO.eprintln "error: benchmark/rules or benchmark/data is empty — run from the repo root"
     return 1
-  IO.println s!"budget {budget}ms per cell; a row stops once a cell exceeds it"
-  IO.println ""
   for (rname, rsrc) in rules do
     IO.println s!"{rname}"
-    IO.println s!"  {pad "data" 10}{pad "atoms" 8}{pad "stepwise" 11}{pad "layerwise" 11}\
-{pad "matching" 11}speedup"
-    -- Tracked per evaluator, not per row: Stepwise and Matching give out
-    -- roughly an order of magnitude sooner than Layerwise, and watching
-    -- Layerwise carry on past that point is the interesting part of the
-    -- table.
-    let mut stopS := false
-    let mut stopL := false
-    let mut stopM := false
+    IO.println s!"  {pad "data" 10}{pad "atoms" 8}{pad "stepwise" 11}{pad "layerwise" 11}matching"
     for (dname, dsrc) in data do
-      if stopS && stopL && stopM then
-        IO.println s!"  {pad dname 10}(skipped)"
-      else
-        match parseProgram (rsrc ++ "\n" ++ dsrc) with
-        | none => IO.println s!"  {pad dname 10}PARSE ERROR"
-        | some p =>
-          -- Layerwise first, being the cheap one: if it is already over
-          -- budget then Stepwise and Matching are hopeless and not worth
-          -- starting.
-          let mut lTxt := "-"; let mut aTxt := "-"; let mut lms := 0
-          if !stopL then
-            let (ms, n) ← timeMs λ _ ↦ (Layerwise.saturate p).length
-            lms := ms; lTxt := s!"{ms}ms"; aTxt := toString n
-            if ms > budget then stopL := true
-          let mut sTxt := "-"; let mut sms := 0
-          if !stopS && !stopL then
-            let (ms, _) ← timeMs λ _ ↦ (Stepwise.saturate p).length
-            sms := ms; sTxt := s!"{ms}ms"
-            if ms > budget then stopS := true
-          else
-            stopS := true
-          let mut mTxt := "-"
-          if !stopM && !stopL then
-            let (ms, _) ← timeMs λ _ ↦ (Matching.saturate p).length
-            mTxt := s!"{ms}ms"
-            if ms > budget then stopM := true
-          else
-            stopM := true
-          let spd := if sms > 0 && lms > 0 then ratio sms lms else ""
-          IO.println s!"  {pad dname 10}{pad aTxt 8}\
-{pad sTxt 11}{pad lTxt 11}{pad mTxt 11}{spd}"
-          (← IO.getStdout).flush
+      match parseProgram (rsrc ++ "\n" ++ dsrc) with
+      | none => IO.println s!"  {pad dname 10}PARSE ERROR"
+      | some p =>
+        let (sms, _) ← timeMs λ _ ↦ (Stepwise.saturate p).length
+        let (lms, n) ← timeMs λ _ ↦ (Layerwise.saturate p).length
+        let (mms, _) ← timeMs λ _ ↦ (Matching.saturate p).length
+        IO.println s!"  {pad dname 10}{pad (toString n) 8}\
+{pad s!"{sms}ms" 11}{pad s!"{lms}ms" 11}{mms}ms"
+        (← IO.getStdout).flush
     IO.println ""
   return 0

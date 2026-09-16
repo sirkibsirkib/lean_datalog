@@ -610,53 +610,57 @@ theorem matchBody_complete {kb: List GrAtom} {σ: Subst}:
 
 end Matching
 
+-- Trimmed to the Herbrand base up front, by an explicit filter. Without
+-- this, membership in `matchStepAtoms p kb` would only land in the base
+-- when `kb` itself already does (unlike Step.lean's candidate
+-- substitutions, which get that confinement for free from `p.consts`
+-- regardless of `kb` — matching draws its values straight out of `kb`).
+-- Filtering here keeps that invariant unconditional, so `saturateGo` below
+-- can be the same one-tick-per-atom loop as Stepwise.lean's, with no extra
+-- bookkeeping threaded through its well-founded recursion.
 def Program.matchStepAtoms (p: Program) (kb: List GrAtom): List GrAtom :=
-  p.flatMap λ r ↦
-    (Matching.matchBody kb [] r.body).map λ ps ↦ Subst.grounded r.head (Subst.ofAssoc ps)
+  (p.flatMap λ r ↦
+    (Matching.matchBody kb [] r.body).map λ ps ↦ Subst.grounded r.head (Subst.ofAssoc ps))
+  |>.filter (λ a ↦ decide (a ∈ p.herbrand_base))
 
 -- Soundness, in the same shape as `Program.mem_stepAtoms` (Step.lean): every
 -- atom the matcher produces is some rule's head under a substitution whose
--- body fires against `kb` — here needing `kb` bounded by the Herbrand base,
--- since (unlike the candidate-substitution approach) the values this
--- substitution takes come from `kb` itself rather than from `p.consts`
--- directly.
-theorem Program.mem_matchStepAtoms {p: Program} {kb: List GrAtom} {a: GrAtom}
-    (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base):
+-- body fires against `kb`.
+theorem Program.mem_matchStepAtoms {p: Program} {kb: List GrAtom} {a: GrAtom}:
     a ∈ p.matchStepAtoms kb →
     ∃ r ∈ p, ∃ σ: Subst,
-      (∀ v ∈ r.vars, σ v ∈ p.consts)
-    ∧ (∀ b ∈ r.body, Subst.grounded b σ ∈ kb)
+      (∀ b ∈ r.body, Subst.grounded b σ ∈ kb)
     ∧ a = Subst.grounded r.head σ
 := by
   intro ha
   unfold Program.matchStepAtoms at ha
+  obtain ⟨ha, _⟩ := List.mem_filter.mp ha
   obtain ⟨r, hr, ha⟩ := List.mem_flatMap.mp ha
   obtain ⟨ps, hps, rfl⟩ := List.mem_map.mp ha
   obtain ⟨_, _, hbody⟩ := Matching.matchBody_sound Matching.PartialSubst.functional_nil hps
-  exact ⟨r, hr, Subst.ofAssoc ps, Program.subst_consts hbound hbody, hbody, rfl⟩
+  exact ⟨r, hr, Subst.ofAssoc ps, hbody, rfl⟩
 
--- ...and so, exactly as for `Program.stepAtoms`, everything the matcher
--- produces lands in the Herbrand base — GIVEN `kb` already does.
-theorem Program.matchStepAtoms_mem_herbrand_base {p: Program} {kb: List GrAtom} {a: GrAtom}
-    (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base):
+-- ...and, by construction of the filter, unconditionally in the base —
+-- with no need for `kb` itself to be bounded first.
+theorem Program.matchStepAtoms_mem_herbrand_base {p: Program} {kb: List GrAtom} {a: GrAtom}:
     a ∈ p.matchStepAtoms kb →
     a ∈ p.herbrand_base
 := by
   intro ha
-  obtain ⟨r, hr, σ, hcs, _, rfl⟩ := Program.mem_matchStepAtoms hbound ha
-  refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
-  refine Atom.mem_groundings (λ v hv ↦ hcs v ?_)
-  obtain ⟨b, hb, hbv⟩ := r.safe v hv
-  exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
+  unfold Program.matchStepAtoms at ha
+  exact (of_decide_eq_true (List.mem_filter.mp ha).2)
 
 -- COMPLETENESS: if any substitution fires a rule against `kb`, the walk
 -- already produces that head — the payoff of matching rather than blind
--- enumeration. Unlike `Program.mem_stepAtoms_of_fires` (Step.lean), this
--- needs no boundedness hypothesis on `kb` at all: the walk searches `kb`
--- directly rather than reconstructing a `p.consts`-confined candidate, so
--- there is nothing to confine.
+-- enumeration. `matchBody_complete` supplies a partial substitution
+-- agreeing with `σ` wherever it is defined; `matchBody_vars_mem` says that
+-- covers every variable `r.head` could mention, by `Rule.safe`; and
+-- `Atom.ground_congr` turns that pointwise agreement into equality of the
+-- grounded heads. `hbound` is only needed to show the result survives the
+-- filter, exactly as `Program.mem_stepAtoms_of_fires` needs it in Step.lean.
 theorem Program.mem_matchStepAtoms_of_fires {p: Program} {r: Rule} {σ: Subst} {kb: List GrAtom}
     (hr: r ∈ p)
+    (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base)
     (hbody: ∀ b ∈ r.body, Subst.grounded b σ ∈ kb):
     Subst.grounded r.head σ ∈ p.matchStepAtoms kb
 := by
@@ -672,8 +676,17 @@ theorem Program.mem_matchStepAtoms_of_fires {p: Program} {r: Rule} {σ: Subst} {
     obtain ⟨c, hc⟩ := Matching.matchBody_vars_mem hmem' b hb v hbv
     rw [Matching.PartialSubst.ofAssoc_of_mem hfunc' hc]
     exact (hcompat' v c hc).symm
+  have hcs: ∀ v ∈ r.vars, σ v ∈ p.consts := Program.subst_consts hbound hbody
+  have hbase: Subst.grounded r.head σ ∈ p.herbrand_base := by
+    refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
+    refine Atom.mem_groundings (λ v hv ↦ hcs v ?_)
+    obtain ⟨b, hb, hbv⟩ := r.safe v hv
+    exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
+  unfold Program.matchStepAtoms
   rw [← heq]
-  exact List.mem_flatMap.mpr ⟨r, hr, List.mem_map.mpr ⟨ps', hmem', rfl⟩⟩
+  refine List.mem_filter.mpr ⟨List.mem_flatMap.mpr ⟨r, hr, List.mem_map.mpr ⟨ps', hmem', rfl⟩⟩, ?_⟩
+  rw [heq]
+  exact decide_eq_true hbase
 
 -- The program `p(a).  q(X) :- p(X).`, as in Step.lean.
 private def X: Variable := ⟨"X", by decide⟩
@@ -686,156 +699,104 @@ private def prog: Program :=
 private def pa: GrAtom := ⟨⟨p, [.inr a]⟩, by decide⟩
 private def qa: GrAtom := ⟨⟨q, [.inr a]⟩, by decide⟩
 
-example: prog.matchStepAtoms []   = [pa]     := by decide
-example: prog.matchStepAtoms [pa] = [pa, qa] := by decide
-
 namespace Matching
 
-/-
-Saturation itself, fuelled rather than well-founded.
-
-Each tick is one `Program.matchStepAtoms` call, exactly like Stepwise.lean's
-loop. The difference is why it terminates. Step.lean's
-`stepAtoms_mem_herbrand_base` needs no hypothesis on `kb`, so Stepwise.lean
-can let Lean's well-founded recursion machinery track the decreasing measure
-directly. `matchStepAtoms_mem_herbrand_base` above needs `kb` already
-bounded — a fact only available INSIDE a correctness proof, not at the point
-`saturateGo` is defined — and threading it through a `termination_by`
-obligation runs into a real limitation of Lean's equation compiler (the
-auto-generated recursive-call proof term does not survive being generalised
-for a later rewrite). An earlier version of this file worked around that by
-filtering every candidate down to the Herbrand base inside `matchStepAtoms`
-itself; that made the recursion well-founded again, but at the cost of an
-`O(|herbrand_base|)` membership check per candidate PER TICK, which — since
-`herbrand_base` grows with the square of the constants in play — dominated
-the whole computation and defeated the point of matching in the first place.
-
-Fuelling the recursion with a `Nat` sidesteps the problem entirely: a plain
-structural recursion on `Nat` needs no termination proof at all, so
-`matchStepAtoms` can go back to being unfiltered, and boundedness becomes an
-ordinary post-hoc induction instead of a proof obligation baked into the
-definition. `p.herbrand_base.length` is always enough fuel —
-`saturateGo_fixpoint` below is where that is made precise, via the same
-strictly-decreasing-unseen-count measure Stepwise.lean's `termination_by`
-already uses.
--/
-def saturateGo (p: Program): Nat → List GrAtom → List GrAtom
-  | 0, kb => kb
-  | n+1, kb =>
-    match (p.matchStepAtoms kb).find? (λ a ↦ decide (a ∉ kb)) with
-    | none => kb
-    | some a => saturateGo p n (a :: kb)
+-- Saturation itself: tick once per derived atom, exactly like
+-- Stepwise.lean, just consuming `Program.matchStepAtoms` instead of
+-- `Program.stepAtoms`. Filtering `matchStepAtoms` to the Herbrand base up
+-- front (see its definition above) is what keeps this loop word-for-word
+-- the same shape as Stepwise.lean's — no invariant needs threading through
+-- the well-founded recursion itself.
+def saturateGo (p: Program) (kb: List GrAtom): List GrAtom :=
+  match _hfind: (p.matchStepAtoms kb).find? (λ a ↦ decide (a ∉ kb)) with
+  | none => kb
+  | some a => saturateGo p (a :: kb)
+termination_by p.herbrand_base.countP λ b ↦ decide (b ∉ kb)
+decreasing_by
+  have hmem := List.mem_of_find?_eq_some _hfind
+  have hnew: a ∉ kb := by simpa using List.find?_some _hfind
+  refine List.countP_lt_countP (a := a)
+    ?_ (Program.matchStepAtoms_mem_herbrand_base hmem) ?_ ?_
+  · intro x _ hx
+    simp only [decide_eq_true_iff] at hx ⊢
+    exact λ hg ↦ hx (.tail _ hg)
+  · simpa using hnew
+  · simp only [decide_eq_true_iff]
+    exact λ h ↦ h (.head _)
 
 def saturate (p: Program): List GrAtom :=
-  saturateGo p p.herbrand_base.length []
+  saturateGo p []
 
--- The Herbrand bound is an invariant of the loop, for any amount of fuel:
--- an under-fuelled run just stops early at some earlier bounded `kb`.
-theorem saturateGo_bounded (p: Program):
-  ∀ n kb, (∀ g ∈ kb, g ∈ p.herbrand_base) →
-    ∀ g ∈ saturateGo p n kb, g ∈ p.herbrand_base
-:= by
-  intro n
-  induction n with
-  | zero => intro kb hb g hg; exact hb g hg
-  | succ n ih =>
-    intro kb hb g hg
-    simp only [saturateGo] at hg
-    cases hfind: (p.matchStepAtoms kb).find? (λ a ↦ decide (a ∉ kb)) with
-    | none => rw [hfind] at hg; exact hb g hg
-    | some a =>
-      rw [hfind] at hg
-      refine ih (a :: kb) (λ g' hg' ↦ ?_) g hg
-      cases hg' with
-      | head _ => exact Program.matchStepAtoms_mem_herbrand_base hb (List.mem_of_find?_eq_some hfind)
-      | tail _ hg' => exact hb g' hg'
-
--- Each iteration is one `infer` step, so the result stays reachable — again
--- for any amount of fuel.
-theorem saturateGo_reachable (p: Program):
-  ∀ n kb, (∀ g ∈ kb, g ∈ p.herbrand_base) →
-    p.infer.ReflTransGen ∅ (λ g ↦ g ∈ kb) →
-    p.infer.ReflTransGen ∅ (λ g ↦ g ∈ saturateGo p n kb)
-:= by
-  intro n
-  induction n with
-  | zero => intro kb _ h; exact h
-  | succ n ih =>
-    intro kb hb h
-    simp only [saturateGo]
-    cases hfind: (p.matchStepAtoms kb).find? (λ a ↦ decide (a ∉ kb)) with
-    | none => exact h
-    | some a =>
-      have hmem := List.mem_of_find?_eq_some hfind
-      have hb': ∀ g ∈ a :: kb, g ∈ p.herbrand_base := by
-        intro g hg
-        cases hg with
-        | head _ => exact Program.matchStepAtoms_mem_herbrand_base hb hmem
-        | tail _ hg => exact hb g hg
-      refine ih (a :: kb) hb' (.snoc _ _ _ h ?_)
-      obtain ⟨r, hr, σ, _, hbody, rfl⟩ := Program.mem_matchStepAtoms hb hmem
-      have hnew := List.find?_some hfind
-      simp only [decide_eq_true_iff] at hnew
-      exact ⟨r, hr, σ, hbody, hnew, Set.ofList_cons⟩
-
--- The loop returns only at a fixpoint, PROVIDED it started with enough
--- fuel: the count of not-yet-known Herbrand-base atoms strictly drops each
--- tick that finds something new (exactly Stepwise.lean's termination
--- measure), so fuel bounding that count from above can never run out
--- before a genuine fixpoint is reached.
+-- The loop returns only at a fixpoint: `find?` yielding nothing means
+-- every consequence of the knowledge base is already in it.
 theorem saturateGo_fixpoint (p: Program):
-  ∀ n kb, (∀ g ∈ kb, g ∈ p.herbrand_base) →
-    p.herbrand_base.countP (λ b ↦ decide (b ∉ kb)) ≤ n →
-    ∀ a ∈ p.matchStepAtoms (saturateGo p n kb), a ∈ saturateGo p n kb
+  ∀ kb, ∀ a ∈ p.matchStepAtoms (saturateGo p kb), a ∈ saturateGo p kb
 := by
-  intro n
-  induction n with
-  | zero =>
-    intro kb hb hfuel a ha
-    have habase := Program.matchStepAtoms_mem_herbrand_base hb ha
-    have hz: p.herbrand_base.countP (λ b ↦ decide (b ∉ kb)) = 0 := by omega
-    have hmemkb: a ∈ kb := by simpa using List.countP_eq_zero.mp hz a habase
-    exact hmemkb
-  | succ n ih =>
-    intro kb hb hfuel
-    simp only [saturateGo]
-    cases hfind: (p.matchStepAtoms kb).find? (λ a ↦ decide (a ∉ kb)) with
-    | none =>
-      intro a ha
-      simpa using List.find?_eq_none.mp hfind a ha
-    | some a =>
-      have hmem := List.mem_of_find?_eq_some hfind
-      have hnew: a ∉ kb := by simpa using List.find?_some hfind
-      have hb': ∀ g ∈ a :: kb, g ∈ p.herbrand_base := by
-        intro g hg
-        cases hg with
-        | head _ => exact Program.matchStepAtoms_mem_herbrand_base hb hmem
-        | tail _ hg => exact hb g hg
-      have hdec: p.herbrand_base.countP (λ b ↦ decide (b ∉ a :: kb)) <
-                 p.herbrand_base.countP (λ b ↦ decide (b ∉ kb)) := by
-        refine List.countP_lt_countP (a := a)
-          ?_ (Program.matchStepAtoms_mem_herbrand_base hb hmem) ?_ ?_
-        · intro x _ hx
-          simp only [decide_eq_true_iff] at hx ⊢
-          exact λ hgx ↦ hx (.tail _ hgx)
-        · simpa using hnew
-        · simp only [decide_eq_true_iff]
-          exact λ hh ↦ hh (.head _)
-      exact ih (a :: kb) hb' (by omega)
+  intro kb
+  induction kb using saturateGo.induct p with
+  | case1 kb hfind =>
+    rw [saturateGo.eq_def, hfind]
+    intro a ha
+    simpa using List.find?_eq_none.mp hfind a ha
+  | case2 kb a hfind ih =>
+    rw [saturateGo.eq_def, hfind]
+    exact ih
+
+-- The Herbrand bound is an invariant of the loop.
+theorem saturateGo_bounded (p: Program):
+  ∀ kb, (∀ g ∈ kb, g ∈ p.herbrand_base) →
+    ∀ g ∈ saturateGo p kb, g ∈ p.herbrand_base
+:= by
+  intro kb
+  induction kb using saturateGo.induct p with
+  | case1 kb hfind =>
+    intro hb
+    rw [saturateGo.eq_def, hfind]
+    exact hb
+  | case2 kb a hfind ih =>
+    intro hb
+    rw [saturateGo.eq_def, hfind]
+    refine ih (λ g hg ↦ ?_)
+    cases hg with
+    | head _ => exact Program.matchStepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some hfind)
+    | tail _ hg => exact hb g hg
+
+-- Each iteration is one `infer` step, so the result stays reachable.
+theorem saturateGo_reachable (p: Program):
+  ∀ kb, p.infer.ReflTransGen ∅ (λ g ↦ g ∈ kb) →
+    p.infer.ReflTransGen ∅ (λ g ↦ g ∈ saturateGo p kb)
+:= by
+  intro kb
+  induction kb using saturateGo.induct p with
+  | case1 kb hfind =>
+    intro h
+    rw [saturateGo.eq_def, hfind]
+    exact h
+  | case2 kb a hfind ih =>
+    intro h
+    rw [saturateGo.eq_def, hfind]
+    refine ih (.snoc _ _ _ h ?_)
+    obtain ⟨r, hr, σ, hbody, rfl⟩ :=
+      Program.mem_matchStepAtoms (List.mem_of_find?_eq_some hfind)
+    have hnew := List.find?_some hfind
+    simp only [decide_eq_true_iff] at hnew
+    exact ⟨r, hr, σ, hbody, hnew, Set.ofList_cons⟩
 
 theorem saturate_model (p: Program):
     p.model (· ∈ saturate p)
 := by
-  have hbound := saturateGo_bounded p p.herbrand_base.length [] (λ g hg ↦ nomatch hg)
+  have hbound := saturateGo_bounded p [] (λ g hg ↦ nomatch hg)
   constructor
-  · refine saturateGo_reachable p p.herbrand_base.length [] (λ g hg ↦ nomatch hg) ?_
+  · refine saturateGo_reachable p [] ?_
     rw [Set.ofList_nil]
     exact .refl _
   · rintro ⟨kb', r, hr, σ, hfires, hnew, _⟩
-    exact hnew (saturateGo_fixpoint p p.herbrand_base.length [] (λ g hg ↦ nomatch hg)
-      List.countP_le_length _
-      (Program.mem_matchStepAtoms_of_fires hr hfires))
+    exact hnew (saturateGo_fixpoint p [] _
+      (Program.mem_matchStepAtoms_of_fires hr hbound hfires))
 
 def evaluator: Evaluator := ⟨saturate, saturate_model⟩
 
 end Matching
+
+example: prog.matchStepAtoms []   = [pa]     := by decide
+example: prog.matchStepAtoms [pa] = [pa, qa] := by decide
