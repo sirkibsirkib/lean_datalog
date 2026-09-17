@@ -93,6 +93,15 @@ theorem Atom.mem_groundings {a: Atom} {σ: Subst} {cs: List Constant}:
 def Program.herbrand_base (p: Program): List GrAtom :=
   p.atoms.flatMap (Atom.groundings · p.consts)
 
+-- Grounding an atom of `p` with constants of `p` stays in the base.
+theorem Program.grounded_mem_herbrand_base {p: Program} {a: Atom} {σ: Subst}
+    (ha: a ∈ p.atoms) (h: ∀ v ∈ a.vars, σ v ∈ p.consts):
+    Subst.grounded a σ ∈ p.herbrand_base
+:= List.mem_flatMap.mpr ⟨a, ha, Atom.mem_groundings h⟩
+
+theorem Program.head_mem_atoms {p: Program} {r: Rule} (hr: r ∈ p): r.head ∈ p.atoms :=
+  List.mem_flatMap.mpr ⟨r, hr, .head _⟩
+
 -- The base introduces no new constants: a grounded argument is either one
 -- of the `p.consts` substituted in, or a constant already written in the
 -- source atom — and that atom's constants are `p.consts` by construction.

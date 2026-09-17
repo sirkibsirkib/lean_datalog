@@ -70,19 +70,9 @@ theorem Program.mem_stepAtoms {p: Program} {kb: List GrAtom}
   · rw [if_neg hcond] at heq
     cases heq
 
--- A rule's head, grounded by a substitution confined to `p.consts` on the
--- rule's own variables, lands in the Herbrand base — the fact common to
--- every evaluator's "stays within the base" proof, however it produces σ.
-theorem Program.grounded_head_mem_herbrand_base {p: Program} {r: Rule} {σ: Subst}
-    (hr: r ∈ p) (hcs: ∀ v ∈ r.vars, σ v ∈ p.consts):
-    Subst.grounded r.head σ ∈ p.herbrand_base
-:= by
-  refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
-  refine Atom.mem_groundings (λ v hv ↦ hcs v ?_)
-  obtain ⟨b, hb, hbv⟩ := r.safe v hv
-  exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
-
 -- ...and so lands in the Herbrand base, which is what bounds the loop.
+-- Unlike `Rule.fires_head_mem_herbrand_base` this needs no bound on `kb`:
+-- candidates draw their constants from `p.consts` by construction.
 theorem Program.stepAtoms_mem_herbrand_base {p: Program}
     {kb: List GrAtom} {a: GrAtom}:
     a ∈ p.stepAtoms kb →
@@ -90,12 +80,11 @@ theorem Program.stepAtoms_mem_herbrand_base {p: Program}
 := by
   intro ha
   obtain ⟨r, hr, σ, hcs, _, rfl⟩ := Program.mem_stepAtoms ha
-  exact Program.grounded_head_mem_herbrand_base hr hcs
+  refine Program.grounded_mem_herbrand_base (Program.head_mem_atoms hr) (λ v hv ↦ hcs v ?_)
+  obtain ⟨b, hb, hbv⟩ := r.safe v hv
+  exact List.mem_eraseDups.mpr (List.mem_flatMap.mpr ⟨b, hb, hbv⟩)
 
--- A substitution that fires `r` against `kb` can only have used constants
--- from `p.consts`, provided `kb` itself respects the Herbrand bound: each
--- body atom lands in `kb`, hence in the base, and the base introduces no
--- constants the program does not already mention.
+-- `Rule.fires_consts`, restated over `r.vars` as the enumeration needs it.
 theorem Program.subst_consts {p: Program} {r: Rule} {σ: Subst}
     {kb: List GrAtom}:
     (∀ g ∈ kb, g ∈ p.herbrand_base) →
@@ -104,13 +93,11 @@ theorem Program.subst_consts {p: Program} {r: Rule} {σ: Subst}
 := by
   intro hbound hbody v hv
   obtain ⟨b, hb, hbv⟩ := List.mem_flatMap.mp (List.mem_eraseDups.mp hv)
-  refine Program.consts_of_mem_herbrand_base (hbound _ (hbody b hb)) _ ?_
-  exact Atom.mem_consts.mpr (List.mem_map.mpr ⟨.inl v, Atom.mem_vars.mp hbv, rfl⟩)
+  exact Rule.fires_consts (kb := (· ∈ kb)) hbound hbody b hb v hbv
 
 -- COMPLETENESS: if ANY substitution fires `r` against `kb`, the enumeration
--- already produced that head. This is the payoff of enumerating rather than
--- matching, and it rests on `subst_consts` above plus `Atom.ground_congr`:
--- the candidate agreeing with `σ` on `r.vars` grounds `r` identically.
+-- already produced that head. By `subst_consts` some candidate agrees with
+-- `σ` on `r.vars`, and by `Atom.ground_congr` it grounds `r` identically.
 theorem Program.mem_stepAtoms_of_fires {p: Program} {r: Rule} {σ: Subst}
     {kb: List GrAtom}:
     r ∈ p →
@@ -145,5 +132,3 @@ theorem Program.mem_stepAtoms_of_fires {p: Program} {r: Rule} {σ: Subst}
   refine List.mem_flatMap.mpr ⟨r, hr, List.mem_filterMap.mpr
     ⟨_, List.mem_map.mpr ⟨_, hlmem, rfl⟩, ?_⟩⟩
   rw [if_pos hcond, hheadeq]
-
--- Saturation computes the model.

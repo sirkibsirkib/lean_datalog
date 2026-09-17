@@ -12,13 +12,10 @@ unrolled:
          ∅ ──────▸ {a} ──────▸ {a,b} ──────▸ {a,b,c} ──▸ ⋯
               +a         +b           +c
 
-That correspondence is what this implementation is for: `saturateGo` and
-`Program.infer` advance in lockstep, so reachability is a direct induction
-over the loop rather than an argument about batches.
-
-It is not the quick way to compute. `stepAtoms` yields every consequence of
-the current knowledge base, and each tick keeps a single one of them and
-recomputes the rest next time; Layerwise.lean keeps them all.
+Because the loop and `Program.infer` advance in lockstep, reachability is a
+direct induction. It is not the quick way to compute: each tick keeps one
+consequence and recomputes the rest next time, where Layerwise.lean keeps
+them all.
 -/
 
 namespace Stepwise
@@ -40,19 +37,9 @@ def saturateGo (p: Program) (kb: List GrAtom):
   | some a => saturateGo p (a :: kb)
 termination_by p.herbrand_base.countP λ b ↦ decide (b ∉ kb)
 decreasing_by
-  have hmem := List.mem_of_find?_eq_some _hfind
-  have hnew: a ∉ kb := by simpa using List.find?_some _hfind
-  refine List.countP_lt_countP (a := a)
-    ?_ (Program.stepAtoms_mem_herbrand_base hmem) ?_ ?_
-  · -- unknown after implies unknown before: plain weakening
-    intro x _ hx
-    simp only [decide_eq_true_iff] at hx ⊢
-    exact λ hg ↦ hx (.tail _ hg)
-  · -- `a` was unknown before
-    simpa using hnew
-  · -- ...and is known now, since `a` heads the list
-    simp only [decide_eq_true_iff]
-    exact λ h ↦ h (.head _)
+  exact List.countP_not_mem_lt (λ _ h ↦ .tail _ h)
+    (Program.stepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some _hfind))
+    (by simpa using List.find?_some _hfind) (.head _)
 
 def saturate (p: Program): List GrAtom :=
   saturateGo p []
@@ -86,10 +73,8 @@ theorem saturateGo_bounded (p: Program):
   | case2 kb a hfind ih =>
     intro hb
     rw [saturateGo.eq_def, hfind]
-    refine ih (λ g hg ↦ ?_)
-    cases hg with
-    | head _ => exact Program.stepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some hfind)
-    | tail _ hg => exact hb g hg
+    exact ih (List.forall_mem_cons.mpr
+      ⟨Program.stepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some hfind), hb⟩)
 
 -- Each iteration is one `infer` step, so the result stays reachable.
 theorem saturateGo_reachable (p: Program):
@@ -105,24 +90,15 @@ theorem saturateGo_reachable (p: Program):
   | case2 kb a hfind ih =>
     intro h
     rw [saturateGo.eq_def, hfind]
-    refine ih (.snoc _ _ _ h ?_)
     obtain ⟨r, hr, σ, _, hbody, rfl⟩ :=
       Program.mem_stepAtoms (List.mem_of_find?_eq_some hfind)
-    have hnew := List.find?_some hfind
-    simp only [decide_eq_true_iff] at hnew
-    exact ⟨r, hr, σ, hbody, hnew, Set.ofList_cons⟩
+    exact ih (.snoc _ _ _ h (Program.infer_cons hr hbody (by simpa using List.find?_some hfind)))
 
 theorem saturate_model (p: Program):
     p.model (· ∈ saturate p)
-:= by
-  have hbound := saturateGo_bounded p [] (λ g hg ↦ nomatch hg)
-  constructor
-  · refine saturateGo_reachable p [] ?_
-    rw [Set.ofList_nil]
-    exact .refl _
-  · rintro ⟨kb', r, hr, σ, hfires, hnew, _⟩
-    exact hnew (saturateGo_fixpoint p [] _
-      (Program.mem_stepAtoms_of_fires hr hbound hfires))
+:= Program.model_of_closed (saturateGo_reachable p [] p.reachable_nil)
+    λ _ hr _ hf ↦ saturateGo_fixpoint p [] _ (Program.mem_stepAtoms_of_fires hr
+      (saturateGo_bounded p [] (λ _ h ↦ nomatch h)) hf)
 
 def evaluator: Evaluator := ⟨saturate, saturate_model⟩
 

@@ -93,3 +93,15 @@ theorem List.countP_lt_countP {α: Type} {p q: α → Bool} {a: α}:
           | true => exact absurd h hqb
         simp only [hqb', Bool.false_eq_true, if_false]
         omega
+
+-- The termination measure of a saturation loop: growing `kb` into `kb'` by
+-- at least one element `a` of `l` that `kb` lacked strictly shrinks the
+-- count of `l`'s elements not yet known.
+theorem List.countP_not_mem_lt {α: Type} [BEq α] [LawfulBEq α] {l kb kb': List α} {a: α}
+    (hsub: ∀ x ∈ kb, x ∈ kb') (ha: a ∈ l) (hnew: a ∉ kb) (hin: a ∈ kb'):
+    l.countP (λ x ↦ decide (x ∉ kb')) < l.countP (λ x ↦ decide (x ∉ kb))
+:= by
+  refine List.countP_lt_countP (a := a) ?_ ha (by simpa using hnew) (by simpa using hin)
+  intro x _ hx
+  simp only [decide_eq_true_iff] at hx ⊢
+  exact λ h ↦ hx (hsub x h)

@@ -2,11 +2,11 @@
 
 This repository contains a Datalog language specification and interpreter implementation, all in Lean4.
 The interpreter is compilable to a native binary; the user can execute it with any given Datalog program as input.
-Also in Lean, we have formalised the correctness of Datalog interpreters in general, and proven the correcness of our interpreter in particular; the user can let their Local lean installation verify this themselves.
+Also in Lean, we have formalised the correctness of Datalog interpreters in general, and proven the correctness of our interpreter in particular; the user can let their local Lean installation verify this themselves.
 
 Our specification and implementation aim to present a small, human-readable surface for our formalisation of the language, its notion of correctness, and operation of our interpreter.
 To this end, we have tried to present a small and self-contained surface; we have no dependencies beyond the Lean standard library (e.g., we define `Set`). 
-Also, we have stayed as close as possible to textbook Datalog terminology (including "ground" and "atom") and algorithms (naive buttom-up fixpoint evaluation).
+Also, we have stayed as close as possible to textbook Datalog terminology (including "ground" and "atom") and algorithms (naive bottom-up fixpoint evaluation).
 
 > Note: this repo was built with extensive assistance from Claude (Model Opus v5); it also served as my first real foray into using this kind of AI assistance for writing Lean. But rest assured that I have scrutinised the result at least as much as I expect you to, and have prodded and poked throughout, and (re)done some parts by hand, to my own satisfaction. -- Christopher Esterhuyse, 9 Sept. 2026. 
 
@@ -22,7 +22,7 @@ Two files carry the specification, and they are deliberately small:
   `Rule`, `Program`. Note that `Rule` carries its **range-restriction**
   obligation as a field: a rule cannot be constructed unless every variable
   of the head also occurs in the body. Safety is therefore expressed already in the abstract syntax, and the parser proves safety or rejects the input. From another point of view, we interleave what may otherwise be separated into parsing and static analysis.
-- **`LeanDatalog/Semantics.lean`** (58 lines) — `Rule.fires`,
+- **`LeanDatalog/Semantics.lean`** (51 lines) — `Rule.fires`,
   `Program.infer`, `Program.model`. Everything is `Prop`-valued: no
   `Option`, no `if`, nothing that computes.
 
@@ -40,7 +40,7 @@ def Program.model (p: Program) (kb: Kb): Prop :=
 
 
 To be convinced that this is Datalog, the reader should scrutinise these files
-plus `Ground.lean` (84 lines, which defines how variables are substituted in rules).
+plus `Ground.lean` (83 lines, which defines how variables are substituted in rules).
 The remaining files can be ignored, because they necessarily preserve the definition of the language.
 
 `Program.model` formalises two familiar features of Datalog, which are spelled out in `SemanticProps.lean`:
@@ -85,7 +85,7 @@ structure Evaluator where
 
 
 Different evaluators exist, representing different inference algorithms, different internal representations, and so on.
-We have included two evaluators in `Eval/Evaluators/`, encoding two well-known inference algorithms for Datalog. They have much in common, which manifests in them sharing many underlying definitions (e.g., in `Eval/Candidates.lean` for traversing program rules).
+We have included four evaluators in `Eval/Evaluators/`. They have much in common, which manifests in them sharing many underlying definitions (e.g., in `Eval/Candidates.lean` for traversing program rules, and in `Eval/Interface.lean` for assembling correctness proofs).
 
 **`Stepwise.lean`** is perhaps the simplest to understand, because it stays close to our formulation of the semantics: one step at a time, try to find one (grounded) rule to apply, building up the model one atom in each step.
 
@@ -94,7 +94,13 @@ We have included two evaluators in `Eval/Evaluators/`, encoding two well-known i
     +a         +b           +c
 ```
 
-**`Layerwise.lean`** is a second evaluator that we include. It implements a textbook algorithm often called "naive evaluation", applying every gound rule that is applicable in parallel, in rounds, to a fixed point.
+**`Layerwise.lean`** is a second evaluator that we include. It implements a textbook algorithm often called "naive evaluation", applying every ground rule that is applicable in parallel, in rounds, to a fixed point.
+
+Both of the above find applicable ground rules by trying every assignment of the program's constants to a rule's variables.
+**`Matching.lean`** instead matches each rule's body against the atoms derived so far, binding variables as it goes and backtracking on a conflict, so constants that no derived atom mentions cost nothing.
+It is the evaluator the binary uses.
+
+**`SlowMatching.lean`** uses the same matching, but saturates like `Stepwise.lean`. Its termination proof forces a filter that checks every candidate against the Herbrand base, and that filter reintroduces the cost matching avoids. It is kept for comparison.
 
 ### Incremental Mode
 
@@ -124,21 +130,20 @@ To be convinced of correctness, a skeptical reader can work backwards from the e
 
 ### Benchmarking
 
-The evaluators we include are optimised for simplicitly, not runtime speed.
-Nevertheless, we have included a second source entrypoint and compilation target for benchmarking the speed of our interpreter using either of our evaluators head-to-head.
+The evaluators we include are optimised for simplicity, not runtime speed.
+Nevertheless, we have included a second source entrypoint and compilation target for benchmarking the speed of our interpreter using each of our evaluators head-to-head.
 
 We do this for two reasons:
 1. it showcases that evaluators that necessarily compute the same models can nevertheless work at different speeds.
 2. it affords users a secondary method of understanding each evaluator.
 
-`Bench.lean` times our two evaluators on a suite of test programs, and prints their absolute and relative runtimes in a table.
+`Bench.lean` times our evaluators on a suite of test programs, and prints their runtimes in a table.
 This shows how our behaviourally equivalent evaluators differ in speed.
 
 Of course, the runtime depends on your platform, so tests do not pass or fail; their runtimes are just reported.
 
 ```sh
-lake exe bench          # ~2s
-lake exe bench 2000     # raise the per-cell budget, in ms
+lake exe bench          # ~10s
 ```
 
 The benchmarking instrumentation is hardcoded in Lean, but the test programs are not.

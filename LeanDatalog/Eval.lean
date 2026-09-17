@@ -1,7 +1,8 @@
 -- Evaluation. `Interface` fixes what an evaluator is; `Candidates` and
--- `Step` are the machinery any enumeration-based strategy shares; each
--- remaining module is one strategy, and they differ only in how much of a
--- round they consume per tick.
+-- `Step` compute consequences by enumeration. Each evaluator is one
+-- strategy: `Stepwise` and `Layerwise` enumerate, consuming one atom or a
+-- whole round per tick; `Matching` and `SlowMatching` search `kb` instead,
+-- and differ only in how their loops terminate.
 
 import LeanDatalog.Eval.Interface
 import LeanDatalog.Eval.Candidates

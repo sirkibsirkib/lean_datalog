@@ -64,17 +64,8 @@ termination_by p.herbrand_base.countP λ b ↦ decide (b ∉ kb)
 decreasing_by
   have ha: a ∈ round p kb := by rw [_hround]; exact .head _
   obtain ⟨hstep, hnew⟩ := mem_round.mp ha
-  refine List.countP_lt_countP (a := a)
-    ?_ (Program.stepAtoms_mem_herbrand_base hstep) ?_ ?_
-  · -- unknown after the batch implies unknown before it
-    intro x _ hx
-    simp only [decide_eq_true_iff] at hx ⊢
-    exact λ hg ↦ hx (List.mem_append_right _ hg)
-  · -- `a` was unknown before
-    simpa using hnew
-  · -- ...and is known now, since `a` heads the batch
-    simp only [decide_eq_true_iff]
-    exact λ h ↦ h (.head _)
+  exact List.countP_not_mem_lt (λ _ h ↦ List.mem_append_right _ h)
+    (Program.stepAtoms_mem_herbrand_base hstep) hnew (List.mem_append_left _ (.head _))
 
 def saturate (p: Program): List GrAtom :=
   saturateGo p []
@@ -135,21 +126,12 @@ theorem reachable_append (p: Program) (kb: List GrAtom):
     have hrest := ih (λ x hx ↦ hl x (.tail _ hx))
     by_cases hmem: a ∈ l ++ kb
     · -- already derived earlier in this same batch: the set does not change
-      have heq: (λ g ↦ g ∈ a :: l ++ kb) = (λ g: GrAtom ↦ g ∈ l ++ kb) := by
-        funext x
-        apply propext
-        constructor
-        · intro hx
-          cases hx with
-          | head _ => exact hmem
-          | tail _ hx => exact hx
-        · intro hx; exact .tail _ hx
-      rw [heq]
-      exact hrest
-    · refine .snoc _ _ _ hrest ?_
-      obtain ⟨r, hr, σ, _, hbody, rfl⟩ := Program.mem_stepAtoms (hl a (.head _))
-      exact ⟨r, hr, σ, λ b hb ↦ List.mem_append_right _ (hbody b hb),
-        hmem, Set.ofList_cons⟩
+      have heq: (λ g ↦ g ∈ a :: l ++ kb) = (λ g: GrAtom ↦ g ∈ l ++ kb) :=
+        funext λ _ ↦ propext ⟨λ | .head _ => hmem | .tail _ hx => hx, .tail _⟩
+      exact heq ▸ hrest
+    · obtain ⟨r, hr, σ, _, hbody, rfl⟩ := Program.mem_stepAtoms (hl _ (.head _))
+      exact .snoc _ _ _ hrest
+        (Program.infer_cons hr (λ b hb ↦ List.mem_append_right _ (hbody b hb)) hmem)
 
 theorem saturateGo_reachable (p: Program):
   ∀ kb, p.infer.ReflTransGen ∅ (λ g ↦ g ∈ kb) →
@@ -170,15 +152,9 @@ theorem saturateGo_reachable (p: Program):
 
 theorem saturate_model (p: Program):
     p.model (· ∈ saturate p)
-:= by
-  have hbound := saturateGo_bounded p [] (λ g hg ↦ nomatch hg)
-  constructor
-  · refine saturateGo_reachable p [] ?_
-    rw [Set.ofList_nil]
-    exact .refl _
-  · rintro ⟨kb', r, hr, σ, hfires, hnew, _⟩
-    exact hnew (saturateGo_fixpoint p [] _
-      (Program.mem_stepAtoms_of_fires hr hbound hfires))
+:= Program.model_of_closed (saturateGo_reachable p [] p.reachable_nil)
+    λ _ hr _ hf ↦ saturateGo_fixpoint p [] _ (Program.mem_stepAtoms_of_fires hr
+      (saturateGo_bounded p [] (λ _ h ↦ nomatch h)) hf)
 
 def evaluator: Evaluator := ⟨saturate, saturate_model⟩
 

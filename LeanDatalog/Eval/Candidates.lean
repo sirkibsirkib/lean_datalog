@@ -147,6 +147,3 @@ theorem Atom.ground_congr {a: Atom} {σ σ': Subst}:
   cases arg with
   | inl v => exact congrArg Sum.inr (h v (Atom.mem_vars.mpr harg))
   | inr c => rfl
-
--- Every head derivable from `kb` in a single step. A rule with an empty
--- body fires unconditionally, and safety forces its head to be ground.

@@ -1,38 +1,21 @@
 import LeanDatalog.Eval.Evaluators.Matching
 
 /-
-The same backtracking matcher as Matching.lean (`Matching.stepImage`,
-reused unchanged), wired to a saturation loop that filters every candidate
-down to the Herbrand base up front and lets Lean's well-founded recursion
-track termination directly — the way Stepwise.lean does, and the way this
-evaluator's `saturateGo` did before Matching.lean switched to fuel.
+Matching.lean's walk, saturated the way Stepwise.lean saturates: well-founded
+recursion on the count of unknown Herbrand-base atoms. Kept as a cautionary
+comparison.
 
-The filter genuinely does make "everything produced lands in the base"
-hold unconditionally, with no `kb`-bounded hypothesis needed, which is
-exactly what `decreasing_by` below needs to typecheck without threading
-extra state through `saturateGo`'s own recursive argument list. But
-`p.herbrand_base` grows with the square of the constants a program
-mentions, and this filter pays a membership check against it for EVERY
-candidate on EVERY tick — cost that has nothing to do with how many
-candidates actually match, only with how many constants the program
-happens to mention. `benchmark/rules/clutter.lp` is built to make that
-cost dominate: matching's whole advantage over enumeration is skipping
-work that scales with unused constants, and this filter reintroduces
-exactly that scaling. Compare this file's benchmark row to `matching`'s.
+To make that recursion typecheck, every candidate is filtered to the
+Herbrand base, so "everything produced is in the base" holds without
+knowing `kb` is. The filter costs a linear scan of `p.herbrand_base` per
+candidate per tick, and the base grows with the square of the program's
+constants — whether or not any fact uses them. That is exactly the cost
+matching exists to avoid; compare the two on `benchmark/rules/clutter.lp`.
 -/
 
 def Program.slowMatchStepAtoms (p: Program) (kb: List GrAtom): List GrAtom :=
-  (Matching.stepImage p kb).filter (λ a ↦ decide (a ∈ p.herbrand_base))
+  (p.matchStepAtoms kb).filter (λ a ↦ decide (a ∈ p.herbrand_base))
 
--- No boundedness hypothesis needed: this is `Matching.mem_stepImage_core`,
--- restricted to the atoms that survive the filter.
-theorem Program.mem_slowMatchStepAtoms {p: Program} {kb: List GrAtom} {a: GrAtom}:
-    a ∈ p.slowMatchStepAtoms kb →
-    ∃ r ∈ p, ∃ σ: Subst, (∀ b ∈ r.body, Subst.grounded b σ ∈ kb) ∧ a = Subst.grounded r.head σ
-:= λ ha ↦ Matching.mem_stepImage_core (List.mem_filter.mp ha).1
-
--- Unconditionally in the base, by construction of the filter — no need for
--- `kb` itself to be bounded first, which is the whole point of filtering.
 theorem Program.slowMatchStepAtoms_mem_herbrand_base {p: Program} {kb: List GrAtom} {a: GrAtom}:
     a ∈ p.slowMatchStepAtoms kb → a ∈ p.herbrand_base
 := λ ha ↦ of_decide_eq_true (List.mem_filter.mp ha).2
@@ -41,32 +24,20 @@ theorem Program.mem_slowMatchStepAtoms_of_fires {p: Program} {r: Rule} {σ: Subs
     (hr: r ∈ p) (hbound: ∀ g ∈ kb, g ∈ p.herbrand_base)
     (hbody: ∀ b ∈ r.body, Subst.grounded b σ ∈ kb):
     Subst.grounded r.head σ ∈ p.slowMatchStepAtoms kb
-:= List.mem_filter.mpr
-    ⟨Matching.mem_stepImage_of_fires hr hbody,
-     decide_eq_true (Program.grounded_head_mem_herbrand_base hr (Program.subst_consts hbound hbody))⟩
+:= List.mem_filter.mpr ⟨Program.mem_matchStepAtoms_of_fires hr hbody,
+    decide_eq_true (Rule.fires_head_mem_herbrand_base (kb := (· ∈ kb)) hr hbound hbody)⟩
 
 namespace SlowMatching
 
--- One tick per derived atom, exactly like Stepwise.lean's loop: the filter
--- above is what lets Lean's own decreasing-measure tracking carry the
--- whole termination proof, with no fuel and no invariant threaded through
--- `kb`.
 def saturateGo (p: Program) (kb: List GrAtom): List GrAtom :=
   match _hfind: (p.slowMatchStepAtoms kb).find? (λ a ↦ decide (a ∉ kb)) with
   | none => kb
   | some a => saturateGo p (a :: kb)
 termination_by p.herbrand_base.countP λ b ↦ decide (b ∉ kb)
 decreasing_by
-  have hmem := List.mem_of_find?_eq_some _hfind
-  have hnew: a ∉ kb := by simpa using List.find?_some _hfind
-  refine List.countP_lt_countP (a := a)
-    ?_ (Program.slowMatchStepAtoms_mem_herbrand_base hmem) ?_ ?_
-  · intro x _ hx
-    simp only [decide_eq_true_iff] at hx ⊢
-    exact λ hg ↦ hx (.tail _ hg)
-  · simpa using hnew
-  · simp only [decide_eq_true_iff]
-    exact λ h ↦ h (.head _)
+  exact List.countP_not_mem_lt (λ _ h ↦ .tail _ h)
+    (Program.slowMatchStepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some _hfind))
+    (by simpa using List.find?_some _hfind) (.head _)
 
 def saturate (p: Program): List GrAtom :=
   saturateGo p []
@@ -97,14 +68,12 @@ theorem saturateGo_bounded (p: Program):
   | case2 kb a hfind ih =>
     intro hb
     rw [saturateGo.eq_def, hfind]
-    refine ih (λ g hg ↦ ?_)
-    cases hg with
-    | head _ => exact Program.slowMatchStepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some hfind)
-    | tail _ hg => exact hb g hg
+    exact ih (List.forall_mem_cons.mpr
+      ⟨Program.slowMatchStepAtoms_mem_herbrand_base (List.mem_of_find?_eq_some hfind), hb⟩)
 
 theorem saturateGo_reachable (p: Program):
-  ∀ kb, p.infer.ReflTransGen ∅ (λ g ↦ g ∈ kb) →
-    p.infer.ReflTransGen ∅ (λ g ↦ g ∈ saturateGo p kb)
+  ∀ kb, p.infer.ReflTransGen ∅ (· ∈ kb) →
+    p.infer.ReflTransGen ∅ (· ∈ saturateGo p kb)
 := by
   intro kb
   induction kb using saturateGo.induct p with
@@ -115,24 +84,16 @@ theorem saturateGo_reachable (p: Program):
   | case2 kb a hfind ih =>
     intro h
     rw [saturateGo.eq_def, hfind]
-    refine ih (.snoc _ _ _ h ?_)
+    have hnew: a ∉ kb := by simpa using List.find?_some hfind
     obtain ⟨r, hr, σ, hbody, rfl⟩ :=
-      Program.mem_slowMatchStepAtoms (List.mem_of_find?_eq_some hfind)
-    have hnew := List.find?_some hfind
-    simp only [decide_eq_true_iff] at hnew
-    exact ⟨r, hr, σ, hbody, hnew, Set.ofList_cons⟩
+      Program.mem_matchStepAtoms (List.mem_filter.mp (List.mem_of_find?_eq_some hfind)).1
+    exact ih (.snoc _ _ _ h (Program.infer_cons hr hbody hnew))
 
 theorem saturate_model (p: Program):
     p.model (· ∈ saturate p)
-:= by
-  have hbound := saturateGo_bounded p [] (λ g hg ↦ nomatch hg)
-  constructor
-  · refine saturateGo_reachable p [] ?_
-    rw [Set.ofList_nil]
-    exact .refl _
-  · rintro ⟨kb', r, hr, σ, hfires, hnew, _⟩
-    exact hnew (saturateGo_fixpoint p [] _
-      (Program.mem_slowMatchStepAtoms_of_fires hr hbound hfires))
+:= Program.model_of_closed (saturateGo_reachable p [] p.reachable_nil)
+    λ _ hr _ hf ↦ saturateGo_fixpoint p [] _ (Program.mem_slowMatchStepAtoms_of_fires hr
+      (saturateGo_bounded p [] (λ _ h ↦ nomatch h)) hf)
 
 def evaluator: Evaluator := ⟨saturate, saturate_model⟩
 

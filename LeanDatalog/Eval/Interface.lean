@@ -13,6 +13,29 @@ The result is a `List GrAtom` rather than a `Kb` because a `Kb` is
 back to the specification's world.
 -/
 
+/-
+Three facts every evaluator's `model` proof is assembled from, stated once
+over list-backed knowledge bases.
+-/
+
+theorem Program.reachable_nil (p: Program):
+    p.infer.ReflTransGen ∅ (· ∈ ([]: List GrAtom))
+:= Set.ofList_nil ▸ .refl _
+
+-- Consing an unknown head that `r` fires onto `kb` is one `infer` step.
+theorem Program.infer_cons {p: Program} {kb: List GrAtom} {r: Rule} {σ: Subst}
+    (hr: r ∈ p) (hbody: ∀ b ∈ r.body, σ.grounded b ∈ kb) (hnew: σ.grounded r.head ∉ kb):
+    p.infer (· ∈ kb) (· ∈ σ.grounded r.head :: kb)
+:= ⟨r, hr, σ, hbody, hnew, Set.ofList_cons⟩
+
+-- A list reachable from ∅ that already holds every head its rules can fire
+-- is the model: nothing can step out of it.
+theorem Program.model_of_closed {p: Program} {kb: List GrAtom}
+    (hreach: p.infer.ReflTransGen ∅ (· ∈ kb))
+    (hclosed: ∀ r ∈ p, ∀ σ: Subst, (∀ b ∈ r.body, σ.grounded b ∈ kb) → σ.grounded r.head ∈ kb):
+    p.model (· ∈ kb)
+:= ⟨hreach, λ ⟨_, r, hr, σ, hfires, hnew, _⟩ ↦ hnew (hclosed r hr σ hfires)⟩
+
 structure Evaluator where
   saturate: Program → List GrAtom
   model: ∀ p: Program, p.model (· ∈ saturate p)

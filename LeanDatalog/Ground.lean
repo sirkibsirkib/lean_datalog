@@ -1,19 +1,19 @@
 import LeanDatalog.Syntax
 
--- intuitively: syntactic rule you write + subst = semantic rule you apply
+-- Applying a substitution turns a rule as written into a rule instance.
 abbrev Subst: Type := Variable → Constant
 
--- "grounded" property of `T` values and creating grounded values.
+-- Syntax that can be ground: a decidable "has no variables", and a
+-- substitution whose result always has none.
 class Groundable (T: Type) where
-  grounded: T → Bool -- can decide if something is grounded
+  grounded: T → Bool
   ground: Subst → T → T
   ground_grounded: ∀ σ t, grounded (ground σ t)
   ground_idemp:    ∀ σ t, ground σ (ground σ t) = ground σ t
 
--- subtype of `T` with only the grounded elements
 abbrev Grounded  (T: Type) [i: Groundable T] := { t // i.grounded t }
 
--- utility; "ground" is now a method of the substitution function
+-- Argument order flipped for dot notation: `σ.ground t`.
 def Subst.ground {T: Type} [i: Groundable T] (t: T) (σ: Subst): T :=
   i.ground σ t
 

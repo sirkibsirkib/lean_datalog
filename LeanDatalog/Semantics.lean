@@ -5,17 +5,13 @@ import LeanDatalog.Utils.Relation
 /-
 The declarative semantics of a Datalog program.
 
-Everything here is a `Prop`: no `Option`, no `if`, nothing that computes.
-That is what lets these definitions read like the textbook — a knowledge
-base is a set of ground atoms, and inference adds one atom licensed by one
-rule.
+Everything here is a `Prop`, so the definitions read like the textbook: a
+knowledge base is a set of ground atoms, and inference adds one atom
+licensed by one rule.
 
-Staying in `Prop` costs nothing computationally, so there is no reason to
-duplicate any of this in `Bool`. Each definition quantifies over a rule
-body, which is a finite `List`, so `Rule.fires` is decidable for any
-knowledge base whose membership is decidable — see the example at the
-bottom, and the `Decidable (a ∈ s)` bridge in Set.lean. An evaluator can
-reuse these definitions rather than restate them.
+That costs nothing computationally. `Rule.fires` quantifies over a finite
+body, so it is decidable whenever the knowledge base's membership is (see
+the examples at the bottom), and evaluators need no `Bool` copy of it.
 -/
 
 -- What a program knows: a set of ground atoms.
@@ -43,9 +39,6 @@ def Program.model (p: Program) (kb: Kb): Prop :=
   p.infer.ReflTransGen ∅ kb
 ∧ p.infer.Normal kb
 
--- The hook the computational side will hang off: the spec above is already
--- decidable wherever the knowledge base's membership is, so evaluation can
--- test this very definition instead of a `Bool`-valued copy of it.
 example (r: Rule) (σ: Subst) (kb: Kb) [DecidablePred kb]:
     Decidable (r.fires σ kb) := by
   unfold Rule.fires

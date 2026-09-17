@@ -14,8 +14,8 @@ example: EndoRel Nat := all_nat
 
 namespace Function
 
--- Reflexive transitive closure of a given relation:
--- transforms one α-endorelation into another
+-- The reflexive-transitive closure of `r`; in Datalog,
+--   r*(X, X).   r*(X, Z) :- r*(X, Y), r(Y, Z).
 inductive ReflTransGen {α: Type} (r: EndoRel α): EndoRel α where
   | refl x:
       ReflTransGen r x x
@@ -24,8 +24,6 @@ inductive ReflTransGen {α: Type} (r: EndoRel α): EndoRel α where
       ReflTransGen r x y →
                r y z →
       ReflTransGen r x z
-
--- r(X,Z) :- r(X,Y), r(Y,Z)
 
 example: EndoRel Nat → EndoRel Nat := ReflTransGen
 example: EndoRel Nat := ReflTransGen all_nat

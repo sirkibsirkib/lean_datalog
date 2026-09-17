@@ -11,14 +11,10 @@ starting with an uppercase letter parse as `Variable`s (matching the
 `head.`. A `%` starts a comment running to the end of the line, accepted
 anywhere whitespace is.
 
-Parsers consume a `List Char` and return the parsed value together with
-whatever remains (or just the remainder, for punctuation like `char1`,
-where there is no value worth keeping). Most helpers are structurally
-recursive on that list
-(so need no special termination argument); the ones that loop by calling
-back out to another parser (`commaListGo`, shared by `argListGo` and
-`atomListGo`; and `program`) instead recurse via a `Nat` fuel counter
-seeded with the input length, which is structurally decreasing on its own.
+Parsers take a `List Char` and return the parsed value with the remainder
+(just the remainder, for punctuation). Most recurse structurally on that
+list. The loops that call back out to another parser (`commaListGo` and
+`program`) can't, so they recurse on `Nat` fuel seeded with the input length.
 -/
 
 -- `none` when `head :- body` isn't range-restricted, i.e. `Rule.Safe` fails.
@@ -32,14 +28,11 @@ namespace Parse
 def isIdentStart (c: Char): Bool := c.isAlpha
 def isIdentChar  (c: Char): Bool := c.isAlphanum || c == '_'
 
--- Whitespace, and `%` line comments, which are legal exactly where
--- whitespace is: every parser reaches its token through `skipWs`, so
--- extending this one function covers the whole grammar.
+-- Whitespace and `%` line comments. Every parser reaches its token through
+-- `skipWs`, so comments are legal exactly where whitespace is.
 --
--- The two are mutually recursive rather than one function that drops to the
--- newline, because each arm here recurses on the direct tail of its input
--- and so stays structurally recursive; `skipWs (cs.dropWhile ...)` would
--- need a well-founded measure instead.
+-- Mutual recursion keeps both structurally recursive; `skipWs (cs.dropWhile
+-- ...)` would need a well-founded measure.
 mutual
 
   def skipWs: List Char → List Char
@@ -91,11 +84,9 @@ def arg (cs: List Char): Option (Arg × List Char) :=
   (var cs).map (λ (v, cs) ↦ (.inl v, cs)) <|>
     (const cs).map (λ (c, cs) ↦ (.inr c, cs))
 
--- Parses a comma-separated tail `, x, y, ...` for item parser `p`, stopping
--- (without failing) once no comma follows. Structurally recursive on `n`;
--- callers seed it with the input length, since every iteration consumes a
--- comma plus at least one char from `p` (an ident), so the fuel never runs
--- out before parsing does. Shared by `argListGo` and `atomListGo`.
+-- Parses a tail `, x, y, ...` with item parser `p`, stopping once no comma
+-- follows. Each iteration consumes at least a comma, so input length is
+-- enough fuel.
 def commaListGo {α: Type} (p: List Char → Option (α × List Char)):
     Nat → List Char → Option (List α × List Char)
   | 0, cs => some ([], cs)
@@ -153,9 +144,7 @@ def rule (cs: List Char): Option (Rule × List Char) := do
   let r ← Rule.ofHeadBody? head body
   some (r, cs)
 
--- Structurally recursive on `n`, seeded with `cs.length`: each iteration
--- consumes a rule, which itself consumes at least an atom and a `.`, so the
--- fuel never runs out before parsing does.
+-- Each iteration consumes a whole rule, so input length is enough fuel.
 def program (cs: List Char): Option (Program × List Char) :=
   go cs.length cs
 where

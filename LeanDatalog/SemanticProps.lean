@@ -7,28 +7,36 @@ it: that it is confluent, that a program therefore has at most one model,
 and that inference from ∅ terminates, so it has at least one.
 -/
 
--- Inference never leaves the Herbrand base. This is the one lemma joining
--- the Herbrand machinery to the semantics.
---
--- It is where `Rule.safe` earns its keep. Every variable of the head also
--- occurs in the body; the body atoms are already known; known atoms carry
--- only `p.consts`; so every constant the substitution can put in the head
--- is one the base already enumerates. Drop range restriction and the claim
--- collapses: `p(X) :- q(a).` fires under every substitution at all.
+-- A substitution that fires `r` against a bounded `kb` sends every body
+-- variable into `p.consts`: each body atom is known, hence in the base, and
+-- the base introduces no constants of its own.
+theorem Rule.fires_consts {p: Program} {r: Rule} {σ: Subst} {kb: Kb}
+    (hkb: ∀ a ∈ kb, a ∈ p.herbrand_base) (hf: r.fires σ kb):
+    ∀ b ∈ r.body, ∀ v ∈ b.vars, σ v ∈ p.consts
+:= λ b hb v hv ↦ Program.consts_of_mem_herbrand_base (hkb _ (hf b hb)) _
+    (Atom.mem_consts.mpr (List.mem_map.mpr ⟨.inl v, Atom.mem_vars.mp hv, rfl⟩))
+
+-- ...so the head it derives lies in the base. This is where `Rule.safe`
+-- earns its keep: every head variable also occurs in the body. Drop range
+-- restriction and the claim collapses: `p(X) :- q(a).` fires under every
+-- substitution at all.
+theorem Rule.fires_head_mem_herbrand_base {p: Program} {r: Rule} {σ: Subst} {kb: Kb}
+    (hr: r ∈ p) (hkb: ∀ a ∈ kb, a ∈ p.herbrand_base) (hf: r.fires σ kb):
+    σ.grounded r.head ∈ p.herbrand_base
+:= Program.grounded_mem_herbrand_base (Program.head_mem_atoms hr) λ v hv ↦
+    let ⟨b, hb, hbv⟩ := r.safe v hv
+    Rule.fires_consts hkb hf b hb v hbv
+
+-- Inference never leaves the Herbrand base: the one lemma joining the
+-- Herbrand machinery to the semantics.
 theorem Program.infer_mem_herbrand_base {p: Program} {kb kb': Kb}:
     (∀ a ∈ kb, a ∈ p.herbrand_base) →
     p.infer kb kb' →
     ∀ a ∈ kb', a ∈ p.herbrand_base
 := by
-  rintro hkb ⟨r, hr, σ, hfires, _, rfl⟩ a ha
-  rcases ha with h | rfl
+  rintro hkb ⟨r, hr, σ, hfires, _, rfl⟩ a (h | rfl)
   · exact hkb a h
-  · refine List.mem_flatMap.mpr ⟨r.head, List.mem_flatMap.mpr ⟨r, hr, .head _⟩, ?_⟩
-    refine Atom.mem_groundings ?_
-    intro v hv
-    obtain ⟨ba, hba, hbav⟩ := r.safe v hv
-    refine Program.consts_of_mem_herbrand_base (hkb _ (hfires ba hba)) _ ?_
-    exact Atom.mem_consts.mpr (List.mem_map.mpr ⟨.inl v, Atom.mem_vars.mp hbav, rfl⟩)
+  · exact Rule.fires_head_mem_herbrand_base hr hkb hfires
 
 
 /-
